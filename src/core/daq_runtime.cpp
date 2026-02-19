@@ -117,7 +117,7 @@ void run_worker(const DeviceSpec& spec,
   driver->disconnect_device();
 }
 
-bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue) {
+bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue, const FramePublishCallback& on_frame_ready) {
   std::error_code ec;
   std::filesystem::create_directories(cfg.output_dir, ec);
   if (ec) {
@@ -164,6 +164,10 @@ bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue) {
     }
 
     if (!rec.payload.empty()) {
+      if (on_frame_ready) {
+        on_frame_ready(rec);
+      }
+
       ofs.write(reinterpret_cast<const char*>(rec.payload.data()), static_cast<std::streamsize>(rec.payload.size()));
       if (!ofs.good()) {
         std::cerr << "Write failed while handling source: " << rec.source << "\n";
@@ -185,14 +189,16 @@ bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue) {
 
 }  // namespace
 
-int RunDaqCore(const DaqConfig& cfg, volatile std::sig_atomic_t& stop_requested) {
+int RunDaqCore(const DaqConfig& cfg,
+               volatile std::sig_atomic_t& stop_requested,
+               const FramePublishCallback& on_frame_ready) {
   std::cerr << "[INFO] DAQ run starting\n";
   BlockingQueue<FrameRecord> queue;
   std::atomic<bool> running{true};
   std::atomic<bool> writer_ok{true};
 
   std::thread writer([&]() {
-    if (!run_writer(cfg, queue)) {
+    if (!run_writer(cfg, queue, on_frame_ready)) {
       writer_ok.store(false);
       running.store(false);
       queue.close();

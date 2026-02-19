@@ -1,0 +1,26 @@
+#pragma once
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include "monitor/frame_source.hpp"
+
+class ZmqDataFrameSource : public IFrameSource {
+ public:
+  ZmqDataFrameSource(std::string endpoint, uint32_t poll_timeout_ms, uint32_t idle_timeout_sec);
+  ~ZmqDataFrameSource() override;
+
+  SourceStatus next_frame(std::vector<uint8_t>& out_frame, std::string& error_text) override;
+
+ private:
+  bool ensure_connected(std::string& error_text);
+
+  std::string endpoint_;
+  uint32_t poll_timeout_ms_;
+  uint32_t idle_timeout_sec_;
+
+  void* ctx_ = nullptr;
+  void* sub_ = nullptr;
+  bool connected_ = false;
+};

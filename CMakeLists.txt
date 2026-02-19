@@ -4,6 +4,7 @@ project(SimpleDAQ LANGUAGES CXX)
 include(GNUInstallDirs)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBZMQ REQUIRED libzmq)
+find_package(ROOT QUIET COMPONENTS Core RIO Tree)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -43,6 +44,35 @@ add_executable(daqmon src/control/daqmon.cpp)
 target_link_libraries(daqmon PRIVATE daq_control_api)
 target_include_directories(daqmon PRIVATE src)
 
+add_library(daq_monitor
+  src/monitor/frame_source.cpp
+  src/monitor/decoder_registry.cpp
+  src/monitor/sink_text.cpp
+  src/monitor/pipeline.cpp
+  src/monitor/zmq_frame_source.cpp
+  src/decoders/kc705_tof_decoder.cpp
+)
+target_include_directories(daq_monitor PUBLIC src ${LIBZMQ_INCLUDE_DIRS})
+target_compile_options(daq_monitor PRIVATE ${LIBZMQ_CFLAGS_OTHER})
+target_link_libraries(daq_monitor PRIVATE ${LIBZMQ_LIBRARIES})
+
+if(ROOT_FOUND)
+  target_sources(daq_monitor PRIVATE src/monitor/sink_root.cpp)
+  target_link_libraries(daq_monitor PRIVATE ROOT::Core ROOT::RIO ROOT::Tree)
+  target_compile_definitions(daq_monitor PRIVATE SIMPLEDAQ_HAS_ROOT=1)
+else()
+  target_compile_definitions(daq_monitor PRIVATE SIMPLEDAQ_HAS_ROOT=0)
+endif()
+
+add_executable(datamon src/control/datamon.cpp)
+target_link_libraries(datamon PRIVATE daq_monitor)
+target_include_directories(datamon PRIVATE src)
+if(ROOT_FOUND)
+  target_compile_definitions(datamon PRIVATE SIMPLEDAQ_HAS_ROOT=1)
+else()
+  target_compile_definitions(datamon PRIVATE SIMPLEDAQ_HAS_ROOT=0)
+endif()
+
 add_executable(tcp_dummy_device src/tcp_dummy_device.cpp)
 
 install(TARGETS daq_core
@@ -58,6 +88,10 @@ install(TARGETS daqctl
 )
 
 install(TARGETS daqmon
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(TARGETS datamon
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 

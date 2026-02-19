@@ -1,6 +1,7 @@
 #include <csignal>
 #include <cctype>
 #include <cstring>
+#include <cerrno>
 #include <iostream>
 #include <mutex>
 #include <sstream>
@@ -79,6 +80,8 @@ bool parse_config_from_args_text(const std::string& args_text, DaqConfig& cfg, s
 
 class DaqService {
  public:
+  explicit DaqService(FramePublishCallback frame_cb) : frame_cb_(std::move(frame_cb)) {}
+
   ~DaqService() { shutdown(); }
 
   std::string status() const {
@@ -116,7 +119,7 @@ class DaqService {
     }
 
     worker_ = std::thread([this, cfg]() {
-      const int rc = RunDaqCore(cfg, stop_requested_);
+      const int rc = RunDaqCore(cfg, stop_requested_, frame_cb_);
       std::lock_guard<std::mutex> lock(mu_);
       running_ = false;
       last_exit_code_ = rc;
@@ -192,6 +195,7 @@ class DaqService {
   std::string state_ = "idle";
   std::string last_error_;
   DaqConfig active_cfg_;
+  FramePublishCallback frame_cb_;
 };
 
 void publish_status(void* pub_sock, const std::string& payload) {
@@ -200,10 +204,31 @@ void publish_status(void* pub_sock, const std::string& payload) {
   zmq_send(pub_sock, payload.data(), payload.size(), 0);
 }
 
+void publish_data(void* pub_sock, const FrameRecord& rec) {
+  const std::string topic = "data";
+
+  const int flags_more = ZMQ_SNDMORE | ZMQ_DONTWAIT;
+  const int flags_last = ZMQ_DONTWAIT;
+
+  if (zmq_send(pub_sock, topic.data(), topic.size(), flags_more) < 0) {
+    return;
+  }
+  if (zmq_send(pub_sock, rec.source.data(), rec.source.size(), flags_more) < 0) {
+    return;
+  }
+  if (zmq_send(pub_sock, rec.payload.data(), rec.payload.size(), flags_last) < 0) {
+    if (errno == EAGAIN) {
+      return;
+    }
+  }
+}
+
 void print_usage(const char* prog) {
-  std::cerr << "Usage: " << prog << " [--endpoint <zmq-endpoint>] [--status-endpoint <zmq-endpoint>]\n";
+  std::cerr << "Usage: " << prog
+            << " [--endpoint <zmq-endpoint>] [--status-endpoint <zmq-endpoint>] [--data-endpoint <zmq-endpoint>]\n";
   std::cerr << "Default control endpoint: " << daq_defaults::kControlEndpoint << "\n";
   std::cerr << "Default status endpoint:  " << daq_defaults::kStatusEndpoint << "\n";
+  std::cerr << "Default data endpoint:    " << daq_defaults::kDataEndpoint << "\n";
 }
 
 }  // namespace
@@ -211,6 +236,7 @@ void print_usage(const char* prog) {
 int main(int argc, char** argv) {
   std::string endpoint = daq_defaults::kControlEndpoint;
   std::string status_endpoint = daq_defaults::kStatusEndpoint;
+  std::string data_endpoint = daq_defaults::kDataEndpoint;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--endpoint") {
@@ -225,6 +251,12 @@ int main(int argc, char** argv) {
         return 1;
       }
       status_endpoint = argv[++i];
+    } else if (arg == "--data-endpoint") {
+      if (i + 1 >= argc) {
+        print_usage(argv[0]);
+        return 1;
+      }
+      data_endpoint = argv[++i];
     } else if (arg == "--help" || arg == "-h") {
       print_usage(argv[0]);
       return 0;
@@ -277,10 +309,29 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  void* pub_data = zmq_socket(ctx, ZMQ_PUB);
+  if (pub_data == nullptr) {
+    std::cerr << "zmq_socket(ZMQ_PUB) for data failed\n";
+    zmq_close(pub);
+    zmq_close(rep);
+    zmq_ctx_term(ctx);
+    return 1;
+  }
+
+  if (zmq_bind(pub_data, data_endpoint.c_str()) != 0) {
+    std::cerr << "zmq_bind failed: " << data_endpoint << "\n";
+    zmq_close(pub_data);
+    zmq_close(pub);
+    zmq_close(rep);
+    zmq_ctx_term(ctx);
+    return 1;
+  }
+
   std::cerr << "[INFO] daqd control at " << endpoint << "\n";
   std::cerr << "[INFO] daqd status at  " << status_endpoint << "\n";
+  std::cerr << "[INFO] daqd data at    " << data_endpoint << "\n";
 
-  DaqService svc;
+  DaqService svc([&](const FrameRecord& rec) { publish_data(pub_data, rec); });
   std::string last_state = svc.state_name();
   publish_status(pub, svc.status_fields());
 
@@ -325,6 +376,7 @@ int main(int argc, char** argv) {
 
   svc.shutdown();
   publish_status(pub, svc.status_fields());
+  zmq_close(pub_data);
   zmq_close(pub);
   zmq_close(rep);
   zmq_ctx_term(ctx);

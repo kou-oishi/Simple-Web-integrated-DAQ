@@ -103,10 +103,16 @@ Default status endpoint:
 ipc:///tmp/simpledaq_status.sock
 ```
 
+Default data endpoint:
+
+```text
+ipc:///tmp/simpledaq_data.sock
+```
+
 Start daemon:
 
 ```bash
-./build/daqd --endpoint ipc:///tmp/simpledaq_ctrl.sock
+./build/daqd --endpoint ipc:///tmp/simpledaq_ctrl.sock --data-endpoint ipc:///tmp/simpledaq_data.sock
 ```
 
 Send control commands from another terminal:
@@ -122,6 +128,43 @@ Monitor status events:
 
 ```bash
 ./build/daqmon --status-endpoint ipc:///tmp/simpledaq_status.sock
+```
+
+`datamon` decoders are selected as `--decoder <module>[=<module-specific-spec>]`, mirroring `daq_core --device`.
+Current module:
+- `kc705_tof`
+
+`--root-out` uses a decoder-specific ROOT sink selected by `--decoder`, so branch layout depends on decoder module.
+`--text-stream` uses decoder text formatting and prints every decoded event for low-level debugging.
+
+Data monitor from an existing `.dat` file:
+
+```bash
+./build/datamon --input-file ./output/run00001.dat --decoder kc705_tof --print-every 1000
+```
+
+Optional ROOT output (if built with ROOT available):
+
+```bash
+./build/datamon --input-file ./output/run00001.dat --decoder kc705_tof --root-out ./monitor.root --no-console
+```
+
+Live monitor from DAQ output directory (follows `runXXXXX.dat` as files grow/roll):
+
+```bash
+./build/datamon --live-output-dir ./output --run-start 1 --decoder kc705_tof --root-out ./live.root
+```
+
+Direct live monitor from `daqd` data PUB (avoids simultaneous read/write on `.dat`):
+
+```bash
+./build/datamon --data-endpoint ipc:///tmp/simpledaq_data.sock --decoder kc705_tof --root-out ./live.root
+```
+
+Low-level text debug stream (all events):
+
+```bash
+./build/datamon --data-endpoint ipc:///tmp/simpledaq_data.sock --decoder kc705_tof --text-stream --no-console
 ```
 
 Control API contract (for CLI or Web server adapters):

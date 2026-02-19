@@ -7,6 +7,7 @@ namespace daq_defaults {
 
 inline constexpr const char* kControlEndpoint = "ipc:///tmp/simpledaq_ctrl.sock";
 inline constexpr const char* kStatusEndpoint = "ipc:///tmp/simpledaq_status.sock";
+inline constexpr const char* kDataEndpoint = "ipc:///tmp/simpledaq_data.sock";
 
 inline constexpr uint32_t kRunStart = 0;
 inline constexpr uint32_t kEventsPerFile = 100000;
