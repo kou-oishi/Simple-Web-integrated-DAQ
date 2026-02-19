@@ -13,13 +13,11 @@
 #include <vector>
 
 #include "core/blocking_queue.hpp"
+#include "core/defaults.hpp"
 #include "core/device_frontend_registry.hpp"
 #include "core/validation_result.hpp"
 
 namespace {
-
-constexpr size_t kReadChunkSize = 8;
-constexpr int kRunNumberWidth = 9;
 
 const char* to_string(ValidationResult::Status s) {
   switch (s) {
@@ -71,7 +69,8 @@ void run_worker(const DeviceSpec& spec,
 
     while (running.load() && stop_requested == 0) {
       std::vector<uint8_t> chunk;
-      const ReadStatus st = driver->read_bytes(chunk, kReadChunkSize, static_cast<int>(cfg.read_timeout_ms));
+      const ReadStatus st = driver->read_bytes(
+          chunk, daq_defaults::kReadChunkSizeBytes, static_cast<int>(cfg.read_timeout_ms));
       if (st == ReadStatus::kTimeout) {
         continue;
       }
@@ -128,7 +127,7 @@ bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue) {
 
   auto make_run_path = [&](uint32_t run_number) -> std::filesystem::path {
     std::ostringstream oss;
-    oss << "run" << std::setw(kRunNumberWidth) << std::setfill('0') << run_number << ".dat";
+    oss << "run" << std::setw(daq_defaults::kRunNumberWidth) << std::setfill('0') << run_number << ".dat";
     return std::filesystem::path(cfg.output_dir) / oss.str();
   };
 
@@ -187,6 +186,7 @@ bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue) {
 }  // namespace
 
 int RunDaqCore(const DaqConfig& cfg, volatile std::sig_atomic_t& stop_requested) {
+  std::cerr << "[INFO] DAQ run starting\n";
   BlockingQueue<FrameRecord> queue;
   std::atomic<bool> running{true};
   std::atomic<bool> writer_ok{true};
@@ -210,11 +210,15 @@ int RunDaqCore(const DaqConfig& cfg, volatile std::sig_atomic_t& stop_requested)
     if (cfg.duration_sec > 0) {
       const auto elapsed = std::chrono::steady_clock::now() - start;
       if (elapsed >= std::chrono::seconds(cfg.duration_sec)) {
+        std::cerr << "[INFO] duration reached, stopping run\n";
         running.store(false);
         break;
       }
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+  if (stop_requested != 0) {
+    std::cerr << "[INFO] external stop requested\n";
   }
 
   running.store(false);
@@ -231,5 +235,7 @@ int RunDaqCore(const DaqConfig& cfg, volatile std::sig_atomic_t& stop_requested)
     writer.join();
   }
 
-  return writer_ok.load() ? 0 : 1;
+  const int rc = writer_ok.load() ? 0 : 1;
+  std::cerr << "[INFO] DAQ run finished rc=" << rc << "\n";
+  return rc;
 }

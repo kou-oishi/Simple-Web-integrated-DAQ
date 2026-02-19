@@ -84,3 +84,52 @@ For `kc705_tof`, each 8-byte frame is written in host byte order for easier loca
 - ...
 
 Each file rolls over after `--events-per-file` validated events.
+
+## Control API (ZeroMQ)
+
+`daqd` provides a control API over ZeroMQ (`REQ/REP`) so CLI and future Web components can use the same interface.
+It also publishes status updates over ZeroMQ (`PUB/SUB`).
+Default values (endpoints, run numbering width, core runtime defaults) are centralised in `src/core/defaults.hpp`.
+
+Default control endpoint:
+
+```text
+ipc:///tmp/simpledaq_ctrl.sock
+```
+
+Default status endpoint:
+
+```text
+ipc:///tmp/simpledaq_status.sock
+```
+
+Start daemon:
+
+```bash
+./build/daqd --endpoint ipc:///tmp/simpledaq_ctrl.sock
+```
+
+Send control commands from another terminal:
+
+```bash
+./build/daqctl --endpoint ipc:///tmp/simpledaq_ctrl.sock status
+./build/daqctl --endpoint ipc:///tmp/simpledaq_ctrl.sock start --output-dir ./output --run-start 1 --events-per-file 100000 --device kc705_tof=1@127.0.0.2:9101 --device kc705_tof=2@127.0.0.3:9101
+./build/daqctl --endpoint ipc:///tmp/simpledaq_ctrl.sock stop
+./build/daqctl --endpoint ipc:///tmp/simpledaq_ctrl.sock shutdown
+```
+
+Monitor status events:
+
+```bash
+./build/daqmon --status-endpoint ipc:///tmp/simpledaq_status.sock
+```
+
+Control API contract (for CLI or Web server adapters):
+- Transport: ZeroMQ REQ/REP to control endpoint.
+- Request strings:
+`status`
+`start <daq args>`
+`stop`
+`shutdown`
+- Response strings:
+`ok ...` on success, `error ...` on failure.
