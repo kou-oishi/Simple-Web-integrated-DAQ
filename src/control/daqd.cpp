@@ -1,5 +1,6 @@
 #include <csignal>
 #include <cctype>
+#include <chrono>
 #include <cstring>
 #include <cerrno>
 #include <getopt.h>
@@ -100,6 +101,11 @@ class DaqService {
     return state_;
   }
 
+  uint32_t current_run_number() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    return current_run_number_locked();
+  }
+
   std::string start(const std::string& args_text) {
     DaqConfig cfg;
     std::string err;
@@ -117,10 +123,19 @@ class DaqService {
       state_ = "running";
       last_error_.clear();
       active_cfg_ = cfg;
+      published_events_ = 0;
+      events_in_current_run_ = 0;
+      last_source_.clear();
+      started_at_ = std::chrono::steady_clock::now();
     }
 
     worker_ = std::thread([this, cfg]() {
-      const int rc = RunDaqCore(cfg, stop_requested_, frame_cb_);
+      const int rc = RunDaqCore(cfg, stop_requested_, [this](const FrameRecord& rec) {
+        on_frame_published(rec);
+        if (frame_cb_) {
+          frame_cb_(rec);
+        }
+      });
       std::lock_guard<std::mutex> lock(mu_);
       running_ = false;
       last_exit_code_ = rc;
@@ -180,11 +195,46 @@ class DaqService {
 
   std::string status_fields_locked() const {
     std::ostringstream oss;
-    oss << "state=" << state_ << " running=" << (running_ ? 1 : 0) << " last_exit=" << last_exit_code_;
+    oss << "state=" << state_
+        << " running=" << (running_ ? 1 : 0)
+        << " healthy=" << (state_ == "error" ? 0 : 1)
+        << " last_exit=" << last_exit_code_
+        << " events_total=" << published_events_
+        << " run=" << current_run_number_locked()
+        << " events_in_run=" << events_in_current_run_;
+    if (running_) {
+      const auto elapsed = std::chrono::steady_clock::now() - started_at_;
+      const auto sec = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+      oss << " uptime_sec=" << sec;
+    }
+    if (!last_source_.empty()) {
+      oss << " last_source=" << last_source_;
+    }
     if (!last_error_.empty()) {
       oss << " error=" << last_error_;
     }
     return oss.str();
+  }
+
+  uint32_t current_run_number_locked() const {
+    if (active_cfg_.events_per_file == 0) {
+      return active_cfg_.run_start;
+    }
+    return active_cfg_.run_start + static_cast<uint32_t>(published_events_ / active_cfg_.events_per_file);
+  }
+
+  void on_frame_published(const FrameRecord& rec) {
+    std::lock_guard<std::mutex> lock(mu_);
+    ++published_events_;
+    last_source_ = rec.source;
+    if (active_cfg_.events_per_file == 0) {
+      events_in_current_run_ = published_events_;
+      return;
+    }
+    events_in_current_run_ = published_events_ % active_cfg_.events_per_file;
+    if (events_in_current_run_ == 0) {
+      events_in_current_run_ = active_cfg_.events_per_file;
+    }
   }
 
   mutable std::mutex mu_;
@@ -196,6 +246,10 @@ class DaqService {
   std::string state_ = "idle";
   std::string last_error_;
   DaqConfig active_cfg_;
+  uint64_t published_events_ = 0;
+  uint64_t events_in_current_run_ = 0;
+  std::string last_source_;
+  std::chrono::steady_clock::time_point started_at_ = std::chrono::steady_clock::now();
   FramePublishCallback frame_cb_;
 };
 
@@ -354,6 +408,8 @@ int main(int argc, char** argv) {
 
   DaqService svc([&](const FrameRecord& rec) { publish_data(pub_data, rec); });
   std::string last_state = svc.state_name();
+  uint32_t last_run = svc.current_run_number();
+  auto last_status_pub = std::chrono::steady_clock::now();
   publish_status(pub, svc.status_fields());
 
   while (g_terminate == 0 && !svc.is_shutting_down()) {
@@ -389,8 +445,13 @@ int main(int argc, char** argv) {
     }
 
     const std::string state = svc.state_name();
-    if (state != last_state) {
+    const uint32_t run = svc.current_run_number();
+    const auto now = std::chrono::steady_clock::now();
+    const bool periodic = (now - last_status_pub) >= std::chrono::seconds(1);
+    if (state != last_state || run != last_run || periodic) {
       last_state = state;
+      last_run = run;
+      last_status_pub = now;
       publish_status(pub, svc.status_fields());
     }
   }
