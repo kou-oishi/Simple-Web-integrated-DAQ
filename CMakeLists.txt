@@ -12,8 +12,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(daq_core_drivers
   src/drivers/tcp_device_driver.cpp
-  src/validators/kc705_tof_validator.cpp
-  src/frontends/kc705_tof_frontend.cpp
+  src/concrete_modules/kc705_tof/kc705_tof_validator.cpp
+  src/concrete_modules/kc705_tof/kc705_tof_frontend.cpp
   src/core/device_frontend_registry.cpp
   src/core/daq_cli.cpp
   src/core/daq_runtime.cpp
@@ -50,7 +50,7 @@ add_library(daq_monitor
   src/monitor/sink_text.cpp
   src/monitor/pipeline.cpp
   src/monitor/zmq_frame_source.cpp
-  src/decoders/kc705_tof_decoder.cpp
+  src/concrete_modules/kc705_tof/kc705_tof_decoder.cpp
 )
 target_include_directories(daq_monitor PUBLIC src ${LIBZMQ_INCLUDE_DIRS})
 target_compile_options(daq_monitor PRIVATE ${LIBZMQ_CFLAGS_OTHER})
@@ -73,7 +73,7 @@ else()
   target_compile_definitions(datamon PRIVATE SIMPLEDAQ_HAS_ROOT=0)
 endif()
 
-add_executable(tcp_dummy_device src/tcp_dummy_device.cpp)
+add_executable(kc705_tof_dummy_device src/concrete_modules/kc705_tof/kc705_tof_dummy_device.cpp)
 
 install(TARGETS daq_core
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
@@ -95,6 +95,6 @@ install(TARGETS datamon
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-install(TARGETS tcp_dummy_device
+install(TARGETS kc705_tof_dummy_device
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )

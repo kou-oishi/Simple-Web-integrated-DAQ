@@ -1,11 +1,11 @@
-#include "frontends/kc705_tof_frontend.hpp"
+#include "concrete_modules/kc705_tof/kc705_tof_frontend.hpp"
 
 #include <limits>
 #include <memory>
 #include <string>
 
 #include "drivers/tcp_device_driver.hpp"
-#include "validators/kc705_tof_validator.hpp"
+#include "concrete_modules/kc705_tof/kc705_tof_validator.hpp"
 
 namespace {
 

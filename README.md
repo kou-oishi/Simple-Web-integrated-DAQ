@@ -9,7 +9,7 @@ cmake --build build -j
 
 ## TCP dummy device
 
-`tcp_dummy_device` sends 64-bit frames over TCP at a fixed interval.
+`kc705_tof_dummy_device` sends 64-bit frames over TCP at a fixed interval.
 
 Frame layout:
 - top 3 bits: board ID (`0-7`)
@@ -21,20 +21,20 @@ Frames are sent as 8-byte payloads in network byte order (big-endian).
 ### Run
 
 ```bash
-./build/tcp_dummy_device --board-id 3 --channel-id 17 --port 9101 --interval-ms 100
+./build/kc705_tof_dummy_device --board-id 3 --channel-id 17 --port 9101 --interval-ms 100
 ```
 
 To randomise channels within a range:
 
 ```bash
-./build/tcp_dummy_device --board-id 3 --channel-min 8 --channel-max 15 --port 9101 --interval-ms 100
+./build/kc705_tof_dummy_device --board-id 3 --channel-min 8 --channel-max 15 --port 9101 --interval-ms 100
 ```
 
 ### Install
 
 ```bash
 cmake --install build --prefix ./install
-./install/bin/tcp_dummy_device --board-id 3 --channel-id 17 --port 9101 --interval-ms 100
+./install/bin/kc705_tof_dummy_device --board-id 3 --channel-id 17 --port 9101 --interval-ms 100
 ```
 
 ### Quick receive test

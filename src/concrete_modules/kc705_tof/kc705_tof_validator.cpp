@@ -1,4 +1,4 @@
-#include "validators/kc705_tof_validator.hpp"
+#include "concrete_modules/kc705_tof/kc705_tof_validator.hpp"
 
 #include <string>
 

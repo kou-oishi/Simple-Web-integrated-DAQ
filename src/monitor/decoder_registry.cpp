@@ -2,7 +2,7 @@
 
 #include <array>
 
-#include "decoders/kc705_tof_decoder.hpp"
+#include "concrete_modules/kc705_tof/kc705_tof_decoder.hpp"
 
 namespace {
 
