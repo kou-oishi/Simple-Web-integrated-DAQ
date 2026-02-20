@@ -1,8 +1,6 @@
 #include "drivers/tcp_device_driver.hpp"
 
-#include <arpa/inet.h>
 #include <cerrno>
-#include <cstdint>
 #include <cstring>
 #include <utility>
 
@@ -11,8 +9,15 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-TcpDeviceDriver::TcpDeviceDriver(std::string host, uint16_t port, EndianMode endian_mode)
-    : host_(std::move(host)), port_(port), endian_mode_(endian_mode), sock_fd_(-1) {}
+TcpDeviceDriver::TcpDeviceDriver(std::string host,
+                                 uint16_t port,
+                                 EndianMode endian_mode,
+                                 std::size_t network_word_bytes)
+    : host_(std::move(host)),
+      port_(port),
+      endian_mode_(endian_mode),
+      network_word_bytes_(network_word_bytes == 0 ? 1 : network_word_bytes),
+      sock_fd_(-1) {}
 
 TcpDeviceDriver::~TcpDeviceDriver() { disconnect_device(); }
 
@@ -67,7 +72,6 @@ ReadStatus TcpDeviceDriver::read_bytes(std::vector<uint8_t>& out_bytes, size_t m
   if (max_bytes == 0) {
     return ReadStatus::kError;
   }
-
   pollfd pfd{};
   pfd.fd = sock_fd_;
   pfd.events = POLLIN;
@@ -119,13 +123,10 @@ ReadStatus TcpDeviceDriver::read_bytes(std::vector<uint8_t>& out_bytes, size_t m
     network_chunk.resize(static_cast<size_t>(n));
     pending_network_bytes_.insert(pending_network_bytes_.end(), network_chunk.begin(), network_chunk.end());
 
-    while (pending_network_bytes_.size() >= 8) {
-      uint64_t be_word = 0;
-      std::memcpy(&be_word, pending_network_bytes_.data(), sizeof(be_word));
-      const uint64_t host_word = be64_to_host_u64(be_word);
-      const uint8_t* p = reinterpret_cast<const uint8_t*>(&host_word);
-      converted_host_bytes_.insert(converted_host_bytes_.end(), p, p + sizeof(host_word));
-      pending_network_bytes_.erase(pending_network_bytes_.begin(), pending_network_bytes_.begin() + 8);
+    while (pending_network_bytes_.size() >= network_word_bytes_) {
+      append_network_word_as_host(pending_network_bytes_.data(), network_word_bytes_, converted_host_bytes_);
+      pending_network_bytes_.erase(pending_network_bytes_.begin(),
+                                   pending_network_bytes_.begin() + static_cast<std::ptrdiff_t>(network_word_bytes_));
     }
   }
 
@@ -139,11 +140,25 @@ ReadStatus TcpDeviceDriver::read_bytes(std::vector<uint8_t>& out_bytes, size_t m
   return ReadStatus::kOk;
 }
 
-uint64_t TcpDeviceDriver::be64_to_host_u64(uint64_t value) {
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-  return (static_cast<uint64_t>(ntohl(static_cast<uint32_t>(value & 0xFFFFFFFFULL))) << 32) |
-         ntohl(static_cast<uint32_t>(value >> 32));
-#else
-  return value;
-#endif
+bool TcpDeviceDriver::is_little_endian_host() {
+  const uint16_t probe = 1;
+  return reinterpret_cast<const uint8_t*>(&probe)[0] == 1;
+}
+
+void TcpDeviceDriver::append_network_word_as_host(const uint8_t* network_word,
+                                                   std::size_t word_bytes,
+                                                   std::vector<uint8_t>& out_bytes) {
+  if (word_bytes == 0) {
+    return;
+  }
+
+  out_bytes.reserve(out_bytes.size() + word_bytes);
+  if (!is_little_endian_host()) {
+    out_bytes.insert(out_bytes.end(), network_word, network_word + static_cast<std::ptrdiff_t>(word_bytes));
+    return;
+  }
+
+  for (std::size_t i = 0; i < word_bytes; ++i) {
+    out_bytes.push_back(network_word[word_bytes - 1 - i]);
+  }
 }

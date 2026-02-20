@@ -58,7 +58,7 @@ bool Kc705TofFrontend::parse_device_spec(const std::string& spec_after_equals,
 }
 
 std::unique_ptr<IDeviceDriver> Kc705TofFrontend::create_driver(const DeviceSpec& device) const {
-  return std::make_unique<TcpDeviceDriver>(device.host, device.port, TcpDeviceDriver::EndianMode::kNetworkToHostU64);
+  return std::make_unique<TcpDeviceDriver>(device.host, device.port, TcpDeviceDriver::EndianMode::kRawBytes);
 }
 
 std::unique_ptr<IDataValidator> Kc705TofFrontend::create_validator(const DeviceSpec& device) const {

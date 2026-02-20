@@ -17,4 +17,5 @@ class Kc705TofValidator : public IDataValidator {
  private:
   static constexpr size_t kFrameSize = 8;
   uint8_t expected_board_id_;
+  std::vector<uint8_t> buffer_;
 };

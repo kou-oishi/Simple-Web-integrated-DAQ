@@ -1,7 +1,18 @@
 #include "decoders/kc705_tof_decoder.hpp"
 
-#include <cstring>
 #include <sstream>
+
+namespace {
+
+uint64_t read_be_u64(const uint8_t* p) {
+  uint64_t word = 0;
+  for (size_t i = 0; i < 8; ++i) {
+    word = (word << 8U) | static_cast<uint64_t>(p[i]);
+  }
+  return word;
+}
+
+}  // namespace
 
 bool DecodedMessageToKc705TofEvent(const DecodedMessage& message, Kc705TofEvent& out_event, std::string& error_text) {
   const auto* event = std::any_cast<Kc705TofEvent>(&message.payload);
@@ -22,8 +33,7 @@ bool Kc705TofDecoder::frame_to_event(const std::vector<uint8_t>& frame,
     return false;
   }
 
-  uint64_t word = 0;
-  std::memcpy(&word, frame.data(), sizeof(word));
+  const uint64_t word = read_be_u64(frame.data());
 
   out_event.raw_word = word;
   out_event.board_id = static_cast<uint8_t>((word >> 61U) & 0x7U);

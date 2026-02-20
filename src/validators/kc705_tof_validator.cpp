@@ -1,7 +1,18 @@
 #include "validators/kc705_tof_validator.hpp"
 
-#include <cstring>
 #include <string>
+
+namespace {
+
+uint64_t read_be_u64(const uint8_t* p) {
+  uint64_t word = 0;
+  for (size_t i = 0; i < 8; ++i) {
+    word = (word << 8U) | static_cast<uint64_t>(p[i]);
+  }
+  return word;
+}
+
+}  // namespace
 
 Kc705TofValidator::Kc705TofValidator(uint8_t expected_board_id) : expected_board_id_(expected_board_id) {}
 
@@ -18,8 +29,7 @@ ValidationResult Kc705TofValidator::feed(const uint8_t* data, size_t size, std::
   buffer_.insert(buffer_.end(), data, data + size);
 
   while (buffer_.size() >= kFrameSize) {
-    uint64_t word = 0;
-    std::memcpy(&word, buffer_.data(), sizeof(word));
+    const uint64_t word = read_be_u64(buffer_.data());
     const uint8_t board_id = static_cast<uint8_t>((word >> 61U) & 0x7U);
     if (board_id != expected_board_id_) {
       return ValidationResult::Fatal(
@@ -31,8 +41,7 @@ ValidationResult Kc705TofValidator::feed(const uint8_t* data, size_t size, std::
 
     std::vector<uint8_t> frame(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(kFrameSize));
 
-    // KC705 TOF frame: [3-bit board id][5-bit channel id][56-bit value].
-    // Endian normalisation is handled by the TCP driver for this frontend.
+    // KC705 TOF frame: [3-bit board id][5-bit channel id][56-bit value] in big-endian wire order.
     out_frames.push_back(std::move(frame));
     buffer_.erase(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(kFrameSize));
   }
