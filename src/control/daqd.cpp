@@ -2,6 +2,7 @@
 #include <cctype>
 #include <cstring>
 #include <cerrno>
+#include <getopt.h>
 #include <iostream>
 #include <mutex>
 #include <sstream>
@@ -226,6 +227,11 @@ void publish_data(void* pub_sock, const FrameRecord& rec) {
 void print_usage(const char* prog) {
   std::cerr << "Usage: " << prog
             << " [--endpoint <zmq-endpoint>] [--status-endpoint <zmq-endpoint>] [--data-endpoint <zmq-endpoint>]\n";
+  std::cerr << "Options:\n";
+  std::cerr << "  -e, --endpoint <ep>         Control REP endpoint to bind\n";
+  std::cerr << "  -s, --status-endpoint <ep>  Status PUB endpoint to bind\n";
+  std::cerr << "  -d, --data-endpoint <ep>    Data PUB endpoint to bind\n";
+  std::cerr << "  -h, --help                  Show this help\n";
   std::cerr << "Default control endpoint: " << daq_defaults::kControlEndpoint << "\n";
   std::cerr << "Default status endpoint:  " << daq_defaults::kStatusEndpoint << "\n";
   std::cerr << "Default data endpoint:    " << daq_defaults::kDataEndpoint << "\n";
@@ -237,34 +243,49 @@ int main(int argc, char** argv) {
   std::string endpoint = daq_defaults::kControlEndpoint;
   std::string status_endpoint = daq_defaults::kStatusEndpoint;
   std::string data_endpoint = daq_defaults::kDataEndpoint;
-  for (int i = 1; i < argc; ++i) {
-    const std::string arg = argv[i];
-    if (arg == "--endpoint") {
-      if (i + 1 >= argc) {
-        print_usage(argv[0]);
-        return 1;
-      }
-      endpoint = argv[++i];
-    } else if (arg == "--status-endpoint") {
-      if (i + 1 >= argc) {
-        print_usage(argv[0]);
-        return 1;
-      }
-      status_endpoint = argv[++i];
-    } else if (arg == "--data-endpoint") {
-      if (i + 1 >= argc) {
-        print_usage(argv[0]);
-        return 1;
-      }
-      data_endpoint = argv[++i];
-    } else if (arg == "--help" || arg == "-h") {
-      print_usage(argv[0]);
-      return 0;
-    } else {
-      std::cerr << "Unknown argument: " << arg << "\n";
-      print_usage(argv[0]);
-      return 1;
+
+  static constexpr option kLongOpts[] = {
+      {"endpoint", required_argument, nullptr, 'e'},
+      {"status-endpoint", required_argument, nullptr, 's'},
+      {"data-endpoint", required_argument, nullptr, 'd'},
+      {"help", no_argument, nullptr, 'h'},
+      {nullptr, 0, nullptr, 0},
+  };
+
+  optind = 1;
+  opterr = 0;
+  while (true) {
+    const int c = ::getopt_long(argc, argv, ":e:s:d:h", kLongOpts, nullptr);
+    if (c == -1) {
+      break;
     }
+    switch (c) {
+      case 'e':
+        endpoint = optarg;
+        break;
+      case 's':
+        status_endpoint = optarg;
+        break;
+      case 'd':
+        data_endpoint = optarg;
+        break;
+      case 'h':
+        print_usage(argv[0]);
+        return 0;
+      case ':':
+        std::cerr << "Missing value for option: " << argv[optind - 1] << "\n";
+        print_usage(argv[0]);
+        return 1;
+      default:
+        std::cerr << "Unknown argument: " << argv[optind - 1] << "\n";
+        print_usage(argv[0]);
+        return 1;
+    }
+  }
+  if (optind < argc) {
+    std::cerr << "Unknown argument: " << argv[optind] << "\n";
+    print_usage(argv[0]);
+    return 1;
   }
 
   std::signal(SIGINT, handle_signal);

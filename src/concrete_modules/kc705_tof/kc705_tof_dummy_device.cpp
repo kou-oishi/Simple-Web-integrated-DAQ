@@ -4,6 +4,7 @@
 #include <csignal>
 #include <cstdint>
 #include <cstring>
+#include <getopt.h>
 #include <iostream>
 #include <limits>
 #include <random>
@@ -41,6 +42,15 @@ void print_usage(const char* prog) {
   std::cerr << "Usage: " << prog
             << " --board-id <0-7> (--channel-id <0-31> | --channel-min <0-31> --channel-max <0-31>) [--port <1-65535>]"
             << " [--interval-ms <>=1>] [--bind <IPv4>]\n";
+  std::cerr << "Options:\n";
+  std::cerr << "  -b, --board-id <0-7>       Board ID to encode in outgoing frames (required)\n";
+  std::cerr << "  -c, --channel-id <0-31>    Fixed channel ID (mutually exclusive with range options)\n";
+  std::cerr << "  -m, --channel-min <0-31>   Minimum channel ID for random range mode\n";
+  std::cerr << "  -x, --channel-max <0-31>   Maximum channel ID for random range mode\n";
+  std::cerr << "  -p, --port <1-65535>       TCP listen port (default: 9000)\n";
+  std::cerr << "  -i, --interval-ms <n>      Send interval in milliseconds (default: 1000)\n";
+  std::cerr << "  -B, --bind <IPv4>          Bind address (default: 0.0.0.0)\n";
+  std::cerr << "  -h, --help                 Show this help\n";
 }
 
 bool parse_u32(const std::string& s, uint32_t& out) {
@@ -63,86 +73,103 @@ bool parse_args(int argc, char** argv, Config& cfg) {
   bool has_channel_min = false;
   bool has_channel_max = false;
 
-  for (int i = 1; i < argc; ++i) {
-    const std::string arg = argv[i];
-    auto require_value = [&](const char* opt) -> const char* {
-      if (i + 1 >= argc) {
-        std::cerr << "Missing value for " << opt << "\n";
-        return nullptr;
-      }
-      return argv[++i];
-    };
+  static constexpr option kLongOpts[] = {
+      {"board-id", required_argument, nullptr, 'b'},
+      {"channel-id", required_argument, nullptr, 'c'},
+      {"channel-min", required_argument, nullptr, 'm'},
+      {"channel-max", required_argument, nullptr, 'x'},
+      {"port", required_argument, nullptr, 'p'},
+      {"interval-ms", required_argument, nullptr, 'i'},
+      {"bind", required_argument, nullptr, 'B'},
+      {"help", no_argument, nullptr, 'h'},
+      {nullptr, 0, nullptr, 0},
+  };
 
-    if (arg == "--board-id") {
-      const char* val = require_value("--board-id");
-      if (!val) return false;
+  optind = 1;
+  opterr = 0;
+  while (true) {
+    const int c = ::getopt_long(argc, argv, ":b:c:m:x:p:i:B:h", kLongOpts, nullptr);
+    if (c == -1) {
+      break;
+    }
+    switch (c) {
+    case 'b': {
       uint32_t tmp = 0;
-      if (!parse_u32(val, tmp) || tmp > 7) {
-        std::cerr << "Invalid --board-id: " << val << " (expected 0-7)\n";
+      if (!parse_u32(optarg, tmp) || tmp > 7) {
+        std::cerr << "Invalid --board-id: " << optarg << " (expected 0-7)\n";
         return false;
       }
       cfg.board_id = static_cast<uint8_t>(tmp);
       has_board = true;
-    } else if (arg == "--channel-id") {
-      const char* val = require_value("--channel-id");
-      if (!val) return false;
+      break;
+    }
+    case 'c': {
       uint32_t tmp = 0;
-      if (!parse_u32(val, tmp) || tmp > 31) {
-        std::cerr << "Invalid --channel-id: " << val << " (expected 0-31)\n";
+      if (!parse_u32(optarg, tmp) || tmp > 31) {
+        std::cerr << "Invalid --channel-id: " << optarg << " (expected 0-31)\n";
         return false;
       }
       cfg.channel_min = static_cast<uint8_t>(tmp);
       cfg.channel_max = static_cast<uint8_t>(tmp);
       has_channel_id = true;
-    } else if (arg == "--channel-min") {
-      const char* val = require_value("--channel-min");
-      if (!val) return false;
+      break;
+    }
+    case 'm': {
       uint32_t tmp = 0;
-      if (!parse_u32(val, tmp) || tmp > 31) {
-        std::cerr << "Invalid --channel-min: " << val << " (expected 0-31)\n";
+      if (!parse_u32(optarg, tmp) || tmp > 31) {
+        std::cerr << "Invalid --channel-min: " << optarg << " (expected 0-31)\n";
         return false;
       }
       cfg.channel_min = static_cast<uint8_t>(tmp);
       has_channel_min = true;
-    } else if (arg == "--channel-max") {
-      const char* val = require_value("--channel-max");
-      if (!val) return false;
+      break;
+    }
+    case 'x': {
       uint32_t tmp = 0;
-      if (!parse_u32(val, tmp) || tmp > 31) {
-        std::cerr << "Invalid --channel-max: " << val << " (expected 0-31)\n";
+      if (!parse_u32(optarg, tmp) || tmp > 31) {
+        std::cerr << "Invalid --channel-max: " << optarg << " (expected 0-31)\n";
         return false;
       }
       cfg.channel_max = static_cast<uint8_t>(tmp);
       has_channel_max = true;
-    } else if (arg == "--port") {
-      const char* val = require_value("--port");
-      if (!val) return false;
+      break;
+    }
+    case 'p': {
       uint32_t tmp = 0;
-      if (!parse_u32(val, tmp) || tmp == 0 || tmp > 65535) {
-        std::cerr << "Invalid --port: " << val << " (expected 1-65535)\n";
+      if (!parse_u32(optarg, tmp) || tmp == 0 || tmp > 65535) {
+        std::cerr << "Invalid --port: " << optarg << " (expected 1-65535)\n";
         return false;
       }
       cfg.port = static_cast<uint16_t>(tmp);
-    } else if (arg == "--interval-ms") {
-      const char* val = require_value("--interval-ms");
-      if (!val) return false;
+      break;
+    }
+    case 'i': {
       uint32_t tmp = 0;
-      if (!parse_u32(val, tmp) || tmp == 0) {
-        std::cerr << "Invalid --interval-ms: " << val << " (expected >=1)\n";
+      if (!parse_u32(optarg, tmp) || tmp == 0) {
+        std::cerr << "Invalid --interval-ms: " << optarg << " (expected >=1)\n";
         return false;
       }
       cfg.interval_ms = tmp;
-    } else if (arg == "--bind") {
-      const char* val = require_value("--bind");
-      if (!val) return false;
-      cfg.bind_addr = val;
-    } else if (arg == "--help" || arg == "-h") {
+      break;
+    }
+    case 'B':
+      cfg.bind_addr = optarg;
+      break;
+    case 'h':
       print_usage(argv[0]);
       std::exit(0);
-    } else {
-      std::cerr << "Unknown argument: " << arg << "\n";
+    case ':':
+      std::cerr << "Missing value for option: " << argv[optind - 1] << "\n";
+      return false;
+    default:
+      std::cerr << "Unknown argument: " << argv[optind - 1] << "\n";
       return false;
     }
+  }
+
+  if (optind < argc) {
+    std::cerr << "Unknown argument: " << argv[optind] << "\n";
+    return false;
   }
 
   if (!has_board) {

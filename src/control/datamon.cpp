@@ -1,6 +1,7 @@
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
+#include <getopt.h>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -43,20 +44,21 @@ void print_usage(const char* prog) {
   std::cerr << "Usage: " << prog
             << " [input_file.dat] [--live-output-dir <dir> | --data-endpoint <zmq-endpoint>] [options]\n";
   std::cerr << "Options:\n";
-  std::cerr << "  --decoder <name[=spec]>   Decoder module and optional module-specific spec\n";
-  std::cerr << "                            Example: kc705_tof\n";
-  std::cerr << "  --max-events <n>          Maximum events to decode (0 means all)\n";
-  std::cerr << "  --print-every <n>         Print every n events (default: 1000)\n";
-  std::cerr << "  --run-start <n>           Live mode start run number (default: " << daq_defaults::kRunStart << ")\n";
-  std::cerr << "  --poll-ms <n>             Live mode polling interval in ms (default: 200)\n";
-  std::cerr << "  --idle-timeout-sec <n>    Live mode stop if no data for n sec (0 means never stop)\n";
-  std::cerr << "  --data-endpoint <ep>      Direct data subscribe endpoint (e.g. "
+  std::cerr << "  -l, --live-output-dir <dir>  Read live run files from output directory\n";
+  std::cerr << "  -e, --data-endpoint <ep>      Subscribe directly to ZMQ data endpoint (default: "
             << daq_defaults::kDataEndpoint << ")\n";
-  std::cerr << "  --text-stream             Stream every decoded event as plain text\n";
-  std::cerr << "  --text-output <path|- >   Text stream output destination ('-' or omitted means stdout)\n";
-  std::cerr << "  --no-console              Disable console sink\n";
-  std::cerr << "  --root-out <file.root>    Optional ROOT output (TTree 'events')\n";
-  std::cerr << "  --help                    Show this help\n";
+  std::cerr << "  -d, --decoder <name[=spec]>   Decoder module and optional decoder spec (e.g. kc705_tof)\n";
+  std::cerr << "  -m, --max-events <n>          Maximum events to decode (0 means all)\n";
+  std::cerr << "  -p, --print-every <n>         Console summary interval (default: 1000)\n";
+  std::cerr << "  -r, --run-start <n>           Live mode starting run number (default: "
+            << daq_defaults::kRunStart << ")\n";
+  std::cerr << "  -q, --poll-ms <n>             Poll interval in milliseconds (default: 200)\n";
+  std::cerr << "  -i, --idle-timeout-sec <n>    Stop after n seconds with no data (0 means never)\n";
+  std::cerr << "  -t, --text-stream             Enable per-event text output\n";
+  std::cerr << "  -o, --text-output <path|->    Text output destination ('-' means stdout)\n";
+  std::cerr << "  -n, --no-console              Disable default console sink\n";
+  std::cerr << "  -O, --root-out <file.root>    Write decoded events to ROOT TTree output\n";
+  std::cerr << "  -h, --help                    Show this help\n";
 }
 
 bool parse_uint64(const std::string& text, uint64_t& out) {
@@ -83,100 +85,106 @@ bool parse_uint32(const std::string& text, uint32_t& out) {
 }
 
 bool parse_args(int argc, char** argv, Options& options) {
-  for (int i = 1; i < argc; ++i) {
+  static constexpr option kLongOpts[] = {
+      {"live-output-dir", required_argument, nullptr, 'l'},
+      {"data-endpoint", required_argument, nullptr, 'e'},
+      {"decoder", required_argument, nullptr, 'd'},
+      {"max-events", required_argument, nullptr, 'm'},
+      {"print-every", required_argument, nullptr, 'p'},
+      {"run-start", required_argument, nullptr, 'r'},
+      {"poll-ms", required_argument, nullptr, 'q'},
+      {"idle-timeout-sec", required_argument, nullptr, 'i'},
+      {"text-stream", no_argument, nullptr, 't'},
+      {"text-output", required_argument, nullptr, 'o'},
+      {"no-console", no_argument, nullptr, 'n'},
+      {"root-out", required_argument, nullptr, 'O'},
+      {"help", no_argument, nullptr, 'h'},
+      {nullptr, 0, nullptr, 0},
+  };
+
+  optind = 1;
+  opterr = 0;
+  while (true) {
+    const int c = ::getopt_long(argc, argv, ":l:e:d:m:p:r:q:i:to:nO:h", kLongOpts, nullptr);
+    if (c == -1) {
+      break;
+    }
+    switch (c) {
+      case 'l':
+        options.live_output_dir = optarg;
+        break;
+      case 'e':
+        options.data_endpoint = optarg;
+        break;
+      case 'd':
+        options.decoder = optarg;
+        break;
+      case 'm':
+        if (!parse_uint64(optarg, options.max_events)) {
+          std::cerr << "Invalid --max-events\n";
+          return false;
+        }
+        break;
+      case 'p':
+        if (!parse_uint64(optarg, options.print_every) || options.print_every == 0) {
+          std::cerr << "Invalid --print-every. Expected integer > 0\n";
+          return false;
+        }
+        break;
+      case 'r':
+        if (!parse_uint32(optarg, options.run_start)) {
+          std::cerr << "Invalid --run-start\n";
+          return false;
+        }
+        break;
+      case 'q':
+        if (!parse_uint32(optarg, options.poll_ms) || options.poll_ms == 0) {
+          std::cerr << "Invalid --poll-ms. Expected integer > 0\n";
+          return false;
+        }
+        break;
+      case 'i':
+        if (!parse_uint32(optarg, options.idle_timeout_sec)) {
+          std::cerr << "Invalid --idle-timeout-sec\n";
+          return false;
+        }
+        break;
+      case 't':
+        options.text_stream = true;
+        break;
+      case 'o':
+        options.text_output = optarg;
+        break;
+      case 'n':
+        options.no_console = true;
+        break;
+      case 'O':
+        options.root_out = optarg;
+        break;
+      case 'h':
+        print_usage(argv[0]);
+        std::exit(0);
+      case ':':
+        std::cerr << "Missing value for option: " << argv[optind - 1] << "\n";
+        return false;
+      default:
+        std::cerr << "Unknown argument: " << argv[optind - 1] << "\n";
+        return false;
+    }
+  }
+
+  for (int i = optind; i < argc; ++i) {
     const std::string arg = argv[i];
-    if (arg == "--live-output-dir") {
-      if (i + 1 >= argc) {
-        std::cerr << "Missing value for --live-output-dir\n";
-        return false;
-      }
-      options.live_output_dir = argv[++i];
-    } else if (arg == "--data-endpoint") {
-      if (i + 1 >= argc) {
-        std::cerr << "Missing value for --data-endpoint\n";
-        return false;
-      }
-      options.data_endpoint = argv[++i];
-    } else if (arg == "--decoder") {
-      if (i + 1 >= argc) {
-        std::cerr << "Missing value for --decoder\n";
-        return false;
-      }
-      options.decoder = argv[++i];
-    } else if (arg == "--max-events") {
-      if (i + 1 >= argc) {
-        std::cerr << "Missing value for --max-events\n";
-        return false;
-      }
-      if (!parse_uint64(argv[++i], options.max_events)) {
-        std::cerr << "Invalid --max-events\n";
-        return false;
-      }
-    } else if (arg == "--print-every") {
-      if (i + 1 >= argc) {
-        std::cerr << "Missing value for --print-every\n";
-        return false;
-      }
-      if (!parse_uint64(argv[++i], options.print_every) || options.print_every == 0) {
-        std::cerr << "Invalid --print-every. Expected integer > 0\n";
-        return false;
-      }
-    } else if (arg == "--run-start") {
-      if (i + 1 >= argc) {
-        std::cerr << "Missing value for --run-start\n";
-        return false;
-      }
-      if (!parse_uint32(argv[++i], options.run_start)) {
-        std::cerr << "Invalid --run-start\n";
-        return false;
-      }
-    } else if (arg == "--poll-ms") {
-      if (i + 1 >= argc) {
-        std::cerr << "Missing value for --poll-ms\n";
-        return false;
-      }
-      if (!parse_uint32(argv[++i], options.poll_ms) || options.poll_ms == 0) {
-        std::cerr << "Invalid --poll-ms. Expected integer > 0\n";
-        return false;
-      }
-    } else if (arg == "--idle-timeout-sec") {
-      if (i + 1 >= argc) {
-        std::cerr << "Missing value for --idle-timeout-sec\n";
-        return false;
-      }
-      if (!parse_uint32(argv[++i], options.idle_timeout_sec)) {
-        std::cerr << "Invalid --idle-timeout-sec\n";
-        return false;
-      }
-    } else if (arg == "--text-stream") {
-      options.text_stream = true;
-    } else if (arg == "--text-output") {
-      if (i + 1 >= argc) {
-        std::cerr << "Missing value for --text-output\n";
-        return false;
-      }
-      options.text_output = argv[++i];
-    } else if (arg == "--no-console") {
-      options.no_console = true;
-    } else if (arg == "--root-out") {
-      if (i + 1 >= argc) {
-        std::cerr << "Missing value for --root-out\n";
-        return false;
-      }
-      options.root_out = argv[++i];
-    } else if (arg == "--help" || arg == "-h") {
-      print_usage(argv[0]);
-      std::exit(0);
-    } else if (!arg.empty() && arg[0] != '-') {
+    if (!arg.empty() && arg[0] != '-') {
       if (!options.input_file.empty()) {
         std::cerr << "Multiple input files provided. Use only one positional input file.\n";
         return false;
       }
       options.input_file = arg;
-    } else {
-      std::cerr << "Unknown argument: " << arg << "\n";
-      return false;
+      continue;
     }
+    std::cerr << "Unknown argument: " << arg << "\n";
+    return false;
   }
 
   int source_count = 0;

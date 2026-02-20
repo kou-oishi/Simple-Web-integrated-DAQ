@@ -1,16 +1,21 @@
 #include <cctype>
+#include <getopt.h>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include "control_api/zmq_control_client.hpp"
+#include "core/daq_cli.hpp"
 #include "core/defaults.hpp"
 
 namespace {
 
 void print_usage(const char* prog) {
   std::cerr << "Usage: " << prog << " [--endpoint <zmq-endpoint>] <command> [args...]\n";
+  std::cerr << "Options:\n";
+  std::cerr << "  -e, --endpoint <ep>  Control endpoint to connect\n";
+  std::cerr << "  -h, --help           Show this help\n";
   std::cerr << "Commands:\n";
   std::cerr << "  status\n";
   std::cerr << "  start <daq args>\n";
@@ -42,44 +47,65 @@ std::string to_lower(std::string s) {
 int main(int argc, char** argv) {
   std::string endpoint = daq_defaults::kControlEndpoint;
 
-  std::vector<std::string> args;
-  for (int i = 1; i < argc; ++i) {
-    args.emplace_back(argv[i]);
-  }
+  static constexpr option kLongOpts[] = {
+      {"endpoint", required_argument, nullptr, 'e'},
+      {"help", no_argument, nullptr, 'h'},
+      {nullptr, 0, nullptr, 0},
+  };
 
-  size_t pos = 0;
-  while (pos < args.size()) {
-    if (args[pos] == "--help" || args[pos] == "-h") {
-      print_usage(argv[0]);
-      return 0;
+  optind = 1;
+  opterr = 0;
+  while (true) {
+    const int c = ::getopt_long(argc, argv, "+:e:h", kLongOpts, nullptr);
+    if (c == -1) {
+      break;
     }
-    if (args[pos] == "--endpoint") {
-      if (pos + 1 >= args.size()) {
+    switch (c) {
+      case 'e':
+        endpoint = optarg;
+        break;
+      case 'h':
+        print_usage(argv[0]);
+        return 0;
+      case ':':
+        std::cerr << "Missing value for option: " << argv[optind - 1] << "\n";
         print_usage(argv[0]);
         return 1;
-      }
-      endpoint = args[pos + 1];
-      pos += 2;
-      continue;
+      default:
+        std::cerr << "Unknown argument: " << argv[optind - 1] << "\n";
+        print_usage(argv[0]);
+        return 1;
     }
-    break;
   }
 
-  if (pos >= args.size()) {
+  if (optind >= argc) {
     print_usage(argv[0]);
     return 1;
   }
 
-  const std::string cmd = to_lower(args[pos]);
+  const std::string cmd = to_lower(argv[optind]);
 
   std::string req;
   if (cmd == "status" || cmd == "stop" || cmd == "shutdown") {
     req = cmd;
   } else if (cmd == "start") {
+    if (optind + 1 < argc) {
+      const std::string first_start_arg = argv[optind + 1];
+      if (first_start_arg == "-h" || first_start_arg == "--help") {
+        PrintDaqUsage("daqctl start");
+        return 0;
+      }
+    }
+
     req = "start";
-    if (pos + 1 < args.size()) {
+    if (optind + 1 < argc) {
       req += " ";
-      req += join_args(args, pos + 1);
+      std::vector<std::string> args;
+      args.reserve(static_cast<size_t>(argc - optind - 1));
+      for (int i = optind + 1; i < argc; ++i) {
+        args.emplace_back(argv[i]);
+      }
+      req += join_args(args, 0);
     }
   } else {
     std::cerr << "Unknown command: " << cmd << "\n";

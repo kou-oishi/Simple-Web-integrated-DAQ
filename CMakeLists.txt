@@ -37,7 +37,7 @@ target_include_directories(daqd PRIVATE ${LIBZMQ_INCLUDE_DIRS})
 target_compile_options(daqd PRIVATE ${LIBZMQ_CFLAGS_OTHER})
 
 add_executable(daqctl src/control/daqctl.cpp)
-target_link_libraries(daqctl PRIVATE daq_control_api)
+target_link_libraries(daqctl PRIVATE daq_control_api daq_core_drivers)
 target_include_directories(daqctl PRIVATE src)
 
 add_executable(daqmon src/control/daqmon.cpp)
