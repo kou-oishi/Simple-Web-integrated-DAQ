@@ -1,3 +1,4 @@
+#include <csignal>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -17,6 +18,10 @@
 #endif
 
 namespace {
+
+volatile std::sig_atomic_t g_stop_requested = 0;
+
+void handle_signal(int /*signum*/) { g_stop_requested = 1; }
 
 struct Options {
   std::string input_file;
@@ -215,6 +220,9 @@ void split_decoder_arg(const std::string& arg, std::string& name, std::string& s
 }  // namespace
 
 int main(int argc, char** argv) {
+  std::signal(SIGINT, handle_signal);
+  std::signal(SIGTERM, handle_signal);
+
   Options options;
   if (!parse_args(argc, argv, options)) {
     print_usage(argv[0]);
@@ -287,7 +295,7 @@ int main(int argc, char** argv) {
   MonitorPipeline pipeline(std::move(source), std::move(decoder), std::move(sinks));
 
   error_text.clear();
-  if (!pipeline.run(options.max_events, error_text)) {
+  if (!pipeline.run(options.max_events, error_text, &g_stop_requested)) {
     std::cerr << "datamon failed: " << error_text << "\n";
     return 1;
   }

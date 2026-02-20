@@ -1,5 +1,6 @@
 #pragma once
 
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -16,14 +17,18 @@ enum class SourceStatus {
 class IFrameSource {
  public:
   virtual ~IFrameSource() = default;
-  virtual SourceStatus next_frame(std::vector<uint8_t>& out_frame, std::string& error_text) = 0;
+  virtual SourceStatus next_frame(std::vector<uint8_t>& out_frame,
+                                  std::string& error_text,
+                                  const volatile std::sig_atomic_t* stop_requested = nullptr) = 0;
 };
 
 class FileFrameSource : public IFrameSource {
  public:
   FileFrameSource(std::string path, std::size_t frame_size);
 
-  SourceStatus next_frame(std::vector<uint8_t>& out_frame, std::string& error_text) override;
+  SourceStatus next_frame(std::vector<uint8_t>& out_frame,
+                          std::string& error_text,
+                          const volatile std::sig_atomic_t* stop_requested = nullptr) override;
 
  private:
   std::string path_;
@@ -41,7 +46,9 @@ class LiveRunFileSource : public IFrameSource {
                     uint32_t poll_ms,
                     uint32_t idle_timeout_sec);
 
-  SourceStatus next_frame(std::vector<uint8_t>& out_frame, std::string& error_text) override;
+  SourceStatus next_frame(std::vector<uint8_t>& out_frame,
+                          std::string& error_text,
+                          const volatile std::sig_atomic_t* stop_requested = nullptr) override;
 
  private:
   bool open_current_file(std::string& error_text);

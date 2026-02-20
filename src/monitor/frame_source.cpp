@@ -11,9 +11,14 @@
 FileFrameSource::FileFrameSource(std::string path, std::size_t frame_size)
     : path_(std::move(path)), frame_size_(frame_size) {}
 
-SourceStatus FileFrameSource::next_frame(std::vector<uint8_t>& out_frame, std::string& error_text) {
+SourceStatus FileFrameSource::next_frame(std::vector<uint8_t>& out_frame,
+                                         std::string& error_text,
+                                         const volatile std::sig_atomic_t* stop_requested) {
   out_frame.clear();
   error_text.clear();
+  if (stop_requested != nullptr && *stop_requested != 0) {
+    return SourceStatus::kEof;
+  }
 
   if (frame_size_ == 0) {
     error_text = "frame size must be > 0";
@@ -107,9 +112,14 @@ bool LiveRunFileSource::try_advance_next_run(std::string& error_text) {
   return open_current_file(error_text);
 }
 
-SourceStatus LiveRunFileSource::next_frame(std::vector<uint8_t>& out_frame, std::string& error_text) {
+SourceStatus LiveRunFileSource::next_frame(std::vector<uint8_t>& out_frame,
+                                           std::string& error_text,
+                                           const volatile std::sig_atomic_t* stop_requested) {
   out_frame.clear();
   error_text.clear();
+  if (stop_requested != nullptr && *stop_requested != 0) {
+    return SourceStatus::kEof;
+  }
 
   if (frame_size_ == 0) {
     error_text = "frame size must be > 0";
@@ -125,6 +135,10 @@ SourceStatus LiveRunFileSource::next_frame(std::vector<uint8_t>& out_frame, std:
   };
 
   while (true) {
+    if (stop_requested != nullptr && *stop_requested != 0) {
+      return SourceStatus::kEof;
+    }
+
     if (!open_current_file(error_text)) {
       if (is_timed_out()) {
         return SourceStatus::kEof;

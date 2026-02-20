@@ -7,16 +7,30 @@
 
 namespace {
 
-bool recv_msg(void* socket, zmq_msg_t* msg) {
+enum class RecvStatus {
+  kOk,
+  kTimeout,
+  kInterrupted,
+  kError,
+};
+
+RecvStatus recv_msg(void* socket, zmq_msg_t* msg, const volatile std::sig_atomic_t* stop_requested) {
   while (true) {
     const int rc = zmq_msg_recv(msg, socket, 0);
     if (rc >= 0) {
-      return true;
+      return RecvStatus::kOk;
     }
-    if (zmq_errno() == EINTR) {
+    const int e = zmq_errno();
+    if (e == EINTR) {
+      if (stop_requested != nullptr && *stop_requested != 0) {
+        return RecvStatus::kInterrupted;
+      }
       continue;
     }
-    return false;
+    if (e == EAGAIN) {
+      return RecvStatus::kTimeout;
+    }
+    return RecvStatus::kError;
   }
 }
 
@@ -76,9 +90,14 @@ bool ZmqDataFrameSource::ensure_connected(std::string& error_text) {
   return true;
 }
 
-SourceStatus ZmqDataFrameSource::next_frame(std::vector<uint8_t>& out_frame, std::string& error_text) {
+SourceStatus ZmqDataFrameSource::next_frame(std::vector<uint8_t>& out_frame,
+                                            std::string& error_text,
+                                            const volatile std::sig_atomic_t* stop_requested) {
   out_frame.clear();
   error_text.clear();
+  if (stop_requested != nullptr && *stop_requested != 0) {
+    return SourceStatus::kEof;
+  }
 
   if (!ensure_connected(error_text)) {
     return SourceStatus::kError;
@@ -93,6 +112,10 @@ SourceStatus ZmqDataFrameSource::next_frame(std::vector<uint8_t>& out_frame, std
   };
 
   while (true) {
+    if (stop_requested != nullptr && *stop_requested != 0) {
+      return SourceStatus::kEof;
+    }
+
     zmq_msg_t topic_msg;
     zmq_msg_t source_msg;
     zmq_msg_t payload_msg;
@@ -100,13 +123,15 @@ SourceStatus ZmqDataFrameSource::next_frame(std::vector<uint8_t>& out_frame, std
     zmq_msg_init(&source_msg);
     zmq_msg_init(&payload_msg);
 
-    const bool ok_topic = recv_msg(sub_, &topic_msg);
-    if (!ok_topic) {
-      const int e = zmq_errno();
+    const RecvStatus topic_st = recv_msg(sub_, &topic_msg, stop_requested);
+    if (topic_st != RecvStatus::kOk) {
       zmq_msg_close(&topic_msg);
       zmq_msg_close(&source_msg);
       zmq_msg_close(&payload_msg);
-      if (e == EAGAIN) {
+      if (topic_st == RecvStatus::kInterrupted) {
+        return SourceStatus::kEof;
+      }
+      if (topic_st == RecvStatus::kTimeout) {
         if (timed_out()) {
           return SourceStatus::kEof;
         }
@@ -116,13 +141,16 @@ SourceStatus ZmqDataFrameSource::next_frame(std::vector<uint8_t>& out_frame, std
       return SourceStatus::kError;
     }
 
-    const bool ok_source = recv_msg(sub_, &source_msg);
-    const bool ok_payload = ok_source ? recv_msg(sub_, &payload_msg) : false;
-
-    if (!ok_source || !ok_payload) {
+    const RecvStatus source_st = recv_msg(sub_, &source_msg, stop_requested);
+    const RecvStatus payload_st = (source_st == RecvStatus::kOk) ? recv_msg(sub_, &payload_msg, stop_requested)
+                                                                 : source_st;
+    if (source_st != RecvStatus::kOk || payload_st != RecvStatus::kOk) {
       zmq_msg_close(&topic_msg);
       zmq_msg_close(&source_msg);
       zmq_msg_close(&payload_msg);
+      if (source_st == RecvStatus::kInterrupted || payload_st == RecvStatus::kInterrupted) {
+        return SourceStatus::kEof;
+      }
       error_text = "recv multipart data frame failed";
       return SourceStatus::kError;
     }
