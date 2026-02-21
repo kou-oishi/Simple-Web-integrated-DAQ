@@ -16,7 +16,9 @@ struct DeviceSpec {
 struct DaqConfig {
   std::string output_dir;
   uint32_t run_start = daq_defaults::kRunStart;
+  bool run_start_specified = false;
   uint32_t events_per_file = daq_defaults::kEventsPerFile;
+  std::string comment;
   std::vector<DeviceSpec> devices;
   uint32_t reconnect_ms = daq_defaults::kReconnectMs;
   uint32_t read_timeout_ms = daq_defaults::kReadTimeoutMs;

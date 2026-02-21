@@ -33,6 +33,7 @@ set(CORE_DRIVER_SOURCES
   src/drivers/tcp_device_driver.cpp
   src/core/daq_cli.cpp
   src/core/daq_runtime.cpp
+  src/core/mysql_logger.cpp
   src/concrete_modules/module_registry.cpp
   ${KC705_TOF_FRONTEND_SOURCES}
 )
@@ -118,7 +119,8 @@ target_include_directories(daqd PRIVATE ${LIBZMQ_INCLUDE_DIRS})
 target_compile_options(daqd PRIVATE ${LIBZMQ_CFLAGS_OTHER})
 
 add_executable(daqctl src/control/daqctl.cpp)
-target_link_libraries(daqctl PRIVATE daq_control_api daq_core_drivers)
+target_link_libraries(daqctl PRIVATE daq_control_api)
+link_whole_archive_if_supported(daqctl daq_core_drivers)
 target_include_directories(daqctl PRIVATE src)
 
 add_executable(daqmon src/control/daqmon.cpp)

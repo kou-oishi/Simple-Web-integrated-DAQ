@@ -39,10 +39,12 @@ class FileFrameSource : public IFrameSource {
 
  private:
   uint32_t DetectRunNumberFromPath() const;
+  uint32_t DetectSubrunNumberFromPath() const;
 
   std::string path_;
   std::size_t frame_size_;
   uint32_t run_number_ = 0;
+  uint32_t subrun_number_ = 0;
   uint64_t next_event_number_ = 0;
   bool opened_ = false;
   bool eof_ = false;

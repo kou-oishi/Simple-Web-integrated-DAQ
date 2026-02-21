@@ -32,6 +32,23 @@ uint32_t FileFrameSource::DetectRunNumberFromPath() const {
   return saw_digit ? value : 0;
 }
 
+uint32_t FileFrameSource::DetectSubrunNumberFromPath() const {
+  const std::string filename = std::filesystem::path(path_).filename().string();
+  const std::size_t sub_pos = filename.find("_sub");
+  if (sub_pos == std::string::npos) {
+    return 0;
+  }
+  std::size_t pos = sub_pos + 4;
+  uint32_t value = 0;
+  bool saw_digit = false;
+  while (pos < filename.size() && std::isdigit(static_cast<unsigned char>(filename[pos])) != 0) {
+    saw_digit = true;
+    value = static_cast<uint32_t>(value * 10U + static_cast<uint32_t>(filename[pos] - '0'));
+    ++pos;
+  }
+  return saw_digit ? value : 0;
+}
+
 SourceStatus FileFrameSource::NextFrame(FrameEnvelope& out_frame,
                                          std::string& error_text,
                                          const volatile std::sig_atomic_t* stop_requested) {
@@ -53,6 +70,7 @@ SourceStatus FileFrameSource::NextFrame(FrameEnvelope& out_frame,
       return SourceStatus::kError;
     }
     run_number_ = DetectRunNumberFromPath();
+    subrun_number_ = DetectSubrunNumberFromPath();
     next_event_number_ = 0;
     opened_ = true;
   }
@@ -77,7 +95,7 @@ SourceStatus FileFrameSource::NextFrame(FrameEnvelope& out_frame,
   }
 
   out_frame.run_number = run_number_;
-  out_frame.subrun_number = 0;
+  out_frame.subrun_number = subrun_number_;
   out_frame.event_number = next_event_number_++;
 
   return SourceStatus::kOk;

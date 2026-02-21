@@ -7,6 +7,23 @@ cmake -S . -B build
 cmake --build build -j
 ```
 
+## MySQL Subrun Log
+
+DAQ writes one MySQL entry per subrun with:
+- run/subrun number
+- event count
+- start/end time
+- status
+- comment (`--comment`)
+
+Default MySQL connection/table settings are in `src/core/defaults.hpp`.
+
+Initialise the table:
+
+```bash
+mysql -u <user> -p < scripts/init_mysql_log.sql
+```
+
 ## TCP dummy device
 
 `kc705_tof_dummy_device` sends 64-bit frames over TCP at a fixed interval.
@@ -119,7 +136,7 @@ Send control commands from another terminal:
 
 ```bash
 ./build/daqctl --endpoint ipc:///tmp/simpledaq_ctrl.sock status
-./build/daqctl --endpoint ipc:///tmp/simpledaq_ctrl.sock start --output-dir ./output --run-start 1 --events-per-file 100000 --device kc705_tof=1@127.0.0.2:9101 --device kc705_tof=2@127.0.0.3:9101
+./build/daqctl --endpoint ipc:///tmp/simpledaq_ctrl.sock start --output-dir ./output --run-start 1 --events-per-file 100000 --comment "beam tuning" --device kc705_tof=1@127.0.0.2:9101 --device kc705_tof=2@127.0.0.3:9101
 ./build/daqctl --endpoint ipc:///tmp/simpledaq_ctrl.sock stop
 ./build/daqctl --endpoint ipc:///tmp/simpledaq_ctrl.sock shutdown
 ```

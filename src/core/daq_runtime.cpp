@@ -15,6 +15,7 @@
 #include "core/blocking_queue.hpp"
 #include "core/defaults.hpp"
 #include "concrete_modules/module_registry.hpp"
+#include "core/mysql_logger.hpp"
 #include "core/validation_result.hpp"
 
 namespace {
@@ -137,7 +138,29 @@ bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue, const F
   uint32_t subrun_number = 0;
   uint32_t events_in_current_file = 0;
   uint64_t next_event_number = 0;
+  std::chrono::system_clock::time_point subrun_start_time{};
   std::ofstream ofs;
+  MySqlLogger mysql_logger;
+
+  auto write_subrun_log = [&](uint32_t subrun,
+                              uint64_t event_count,
+                              const std::chrono::system_clock::time_point& start_time,
+                              const char* status,
+                              std::string& out_error_text) -> bool {
+    out_error_text.clear();
+    if (event_count == 0 || !mysql_logger.IsEnabled()) {
+      return true;
+    }
+    SubrunLogEntry entry;
+    entry.run_number = run_number;
+    entry.subrun_number = subrun;
+    entry.event_count = event_count;
+    entry.start_time = start_time;
+    entry.end_time = std::chrono::system_clock::now();
+    entry.status = status == nullptr ? "stopped" : status;
+    entry.comment = cfg.comment;
+    return mysql_logger.InsertSubrun(entry, out_error_text);
+  };
 
   auto open_run_file = [&](uint32_t subrun) -> bool {
     const std::filesystem::path path = make_run_path(run_number, subrun);
@@ -147,6 +170,7 @@ bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue, const F
       return false;
     }
     events_in_current_file = 0;
+    subrun_start_time = std::chrono::system_clock::now();
     std::cerr << "[INFO] writing run/subrun file: " << path.string() << "\n";
     return true;
   };
@@ -160,6 +184,11 @@ bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue, const F
     }
 
     if (events_in_current_file >= cfg.events_per_file) {
+      std::string mysql_error;
+      if (!write_subrun_log(subrun_number, events_in_current_file, subrun_start_time, "completed", mysql_error)) {
+        std::cerr << "[ERROR] failed to insert subrun log into MySQL: " << mysql_error << "\n";
+        return false;
+      }
       ofs.close();
       ++subrun_number;
       if (!open_run_file(subrun_number)) {
@@ -178,6 +207,10 @@ bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue, const F
 
       ofs.write(reinterpret_cast<const char*>(rec.payload.data()), static_cast<std::streamsize>(rec.payload.size()));
       if (!ofs.good()) {
+        std::string mysql_error;
+        if (!write_subrun_log(subrun_number, events_in_current_file, subrun_start_time, "error", mysql_error)) {
+          std::cerr << "[ERROR] failed to insert subrun log into MySQL: " << mysql_error << "\n";
+        }
         std::cerr << "Write failed while handling source: " << rec.source << "\n";
         return false;
       }
@@ -185,11 +218,26 @@ bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue, const F
       // Keep file output latency low for online monitoring and crash resilience.
       ofs.flush();
       if (!ofs.good()) {
+        std::string mysql_error;
+        if (!write_subrun_log(subrun_number, events_in_current_file, subrun_start_time, "error", mysql_error)) {
+          std::cerr << "[ERROR] failed to insert subrun log into MySQL: " << mysql_error << "\n";
+        }
         std::cerr << "Flush failed while handling source: " << rec.source << "\n";
         return false;
       }
       ++events_in_current_file;
     }
+  }
+
+  if (ofs.is_open()) {
+    const char* final_status =
+        (cfg.events_per_file > 0 && events_in_current_file >= cfg.events_per_file) ? "completed" : "stopped";
+    std::string mysql_error;
+    if (!write_subrun_log(subrun_number, events_in_current_file, subrun_start_time, final_status, mysql_error)) {
+      std::cerr << "[ERROR] failed to insert subrun log into MySQL: " << mysql_error << "\n";
+      return false;
+    }
+    ofs.close();
   }
 
   return true;
@@ -200,13 +248,25 @@ bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue, const F
 int RunDaqCore(const DaqConfig& cfg,
                volatile std::sig_atomic_t& stop_requested,
                const FramePublishCallback& on_frame_ready) {
+  DaqConfig effective_cfg = cfg;
+  MySqlLogger mysql_logger;
+  std::string run_error;
+  uint32_t resolved_run_number = effective_cfg.run_start;
+  if (!mysql_logger.ResolveRunNumber(
+          effective_cfg.run_start_specified, effective_cfg.run_start, resolved_run_number, run_error)) {
+    std::cerr << "[ERROR] failed to resolve run number via MySQL: " << run_error << "\n";
+    return 1;
+  }
+  effective_cfg.run_start = resolved_run_number;
+  effective_cfg.run_start_specified = true;
+
   std::cerr << "[INFO] DAQ Run starting\n";
   BlockingQueue<FrameRecord> queue;
   std::atomic<bool> running{true};
   std::atomic<bool> writer_ok{true};
 
   std::thread writer([&]() {
-    if (!run_writer(cfg, queue, on_frame_ready)) {
+    if (!run_writer(effective_cfg, queue, on_frame_ready)) {
       writer_ok.store(false);
       running.store(false);
       queue.Close();
@@ -214,16 +274,16 @@ int RunDaqCore(const DaqConfig& cfg,
   });
 
   std::vector<std::thread> workers;
-  workers.reserve(cfg.devices.size());
-  for (const auto& dev : cfg.devices) {
-    workers.emplace_back([&, dev]() { run_worker(dev, cfg, queue, running, stop_requested); });
+  workers.reserve(effective_cfg.devices.size());
+  for (const auto& dev : effective_cfg.devices) {
+    workers.emplace_back([&, dev]() { run_worker(dev, effective_cfg, queue, running, stop_requested); });
   }
 
   const auto start = std::chrono::steady_clock::now();
   while (running.load() && stop_requested == 0) {
-    if (cfg.duration_sec > 0) {
+    if (effective_cfg.duration_sec > 0) {
       const auto elapsed = std::chrono::steady_clock::now() - start;
-      if (elapsed >= std::chrono::seconds(cfg.duration_sec)) {
+      if (elapsed >= std::chrono::seconds(effective_cfg.duration_sec)) {
         std::cerr << "[INFO] duration reached, stopping Run\n";
         running.store(false);
         break;

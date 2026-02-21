@@ -18,4 +18,12 @@ inline constexpr uint32_t kDurationSec = 0;
 inline constexpr std::size_t kReadChunkSizeBytes = 8;
 inline constexpr int kRunNumberWidth = 5;
 
+inline constexpr bool kMySqlEnabled = true;
+inline constexpr const char* kMySqlHost = "127.0.0.1";
+inline constexpr uint32_t kMySqlPort = 3306;
+inline constexpr const char* kMySqlUser           = "daq";
+inline constexpr const char* kMySqlPassword       = "daq";
+inline constexpr const char* kMySqlDatabase       = "daq";
+inline constexpr const char* kMySqlSubrunLogTable = "daq_log";
+
 }  // namespace daq_defaults

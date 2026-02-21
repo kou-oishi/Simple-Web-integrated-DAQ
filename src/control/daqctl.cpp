@@ -27,12 +27,34 @@ void print_usage(const char* prog) {
 }
 
 std::string join_args(const std::vector<std::string>& args, size_t from) {
+  auto quote_arg = [](const std::string& value) -> std::string {
+    bool needs_quote = false;
+    for (const char c : value) {
+      if (std::isspace(static_cast<unsigned char>(c)) != 0 || c == '"' || c == '\\') {
+        needs_quote = true;
+        break;
+      }
+    }
+    if (!needs_quote) {
+      return value;
+    }
+    std::string out = "\"";
+    for (const char c : value) {
+      if (c == '"' || c == '\\') {
+        out.push_back('\\');
+      }
+      out.push_back(c);
+    }
+    out.push_back('"');
+    return out;
+  };
+
   std::ostringstream oss;
   for (size_t i = from; i < args.size(); ++i) {
     if (i > from) {
       oss << ' ';
     }
-    oss << args[i];
+    oss << quote_arg(args[i]);
   }
   return oss.str();
 }

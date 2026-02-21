@@ -49,6 +49,7 @@ void PrintDaqUsage(const char* prog) {
   std::cerr << "  -d, --device <frontend>=<spec> Input device spec; repeatable\n";
   std::cerr << "  -r, --Run-start <n>            Starting Run number (>= 0)\n";
   std::cerr << "  -e, --events-per-file <n>      Events per file (>= 1)\n";
+  std::cerr << "  -m, --comment <text>           Run comment recorded in subrun MySQL log\n";
   std::cerr << "  -c, --reconnect-ms <ms>        Reconnect interval in milliseconds (>= 1)\n";
   std::cerr << "  -t, --read-timeout-ms <ms>     Read timeout in milliseconds (>= 1)\n";
   std::cerr << "  -u, --duration-sec <sec>       Run duration in seconds (>= 1, 0 means unlimited)\n";
@@ -63,6 +64,7 @@ bool ParseDaqArgs(int argc, char** argv, DaqConfig& cfg) {
       {"device", required_argument, nullptr, 'd'},
       {"Run-start", required_argument, nullptr, 'r'},
       {"events-per-file", required_argument, nullptr, 'e'},
+      {"comment", required_argument, nullptr, 'm'},
       {"reconnect-ms", required_argument, nullptr, 'c'},
       {"read-timeout-ms", required_argument, nullptr, 't'},
       {"duration-sec", required_argument, nullptr, 'u'},
@@ -73,7 +75,7 @@ bool ParseDaqArgs(int argc, char** argv, DaqConfig& cfg) {
   optind = 1;
   opterr = 0;
   while (true) {
-    const int c = ::getopt_long(argc, argv, ":o:d:r:e:c:t:u:h", kLongOpts, nullptr);
+    const int c = ::getopt_long(argc, argv, ":o:d:r:e:m:c:t:u:h", kLongOpts, nullptr);
     if (c == -1) {
       break;
     }
@@ -113,6 +115,7 @@ bool ParseDaqArgs(int argc, char** argv, DaqConfig& cfg) {
           return false;
         }
         cfg.run_start = tmp;
+        cfg.run_start_specified = true;
         break;
       }
       case 'e': {
@@ -124,6 +127,9 @@ bool ParseDaqArgs(int argc, char** argv, DaqConfig& cfg) {
         cfg.events_per_file = tmp;
         break;
       }
+      case 'm':
+        cfg.comment = optarg;
+        break;
       case 'c': {
         uint32_t tmp = 0;
         if (!parse_u32(optarg, tmp) || tmp == 0) {

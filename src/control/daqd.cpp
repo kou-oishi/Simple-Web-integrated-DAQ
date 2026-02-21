@@ -19,6 +19,7 @@
 #include "core/data_frame_header.hpp"
 #include "core/daq_runtime.hpp"
 #include "core/defaults.hpp"
+#include "core/mysql_logger.hpp"
 
 namespace {
 
@@ -55,11 +56,48 @@ std::string to_lower(std::string s) {
 }
 
 bool parse_config_from_args_text(const std::string& args_text, DaqConfig& cfg, std::string& err) {
-  std::istringstream iss(args_text);
+  auto split_args = [](const std::string& text, std::vector<std::string>& out_args) -> bool {
+    out_args.clear();
+    std::string current;
+    bool in_quotes = false;
+    bool escaping = false;
+    for (const char c : text) {
+      if (escaping) {
+        current.push_back(c);
+        escaping = false;
+        continue;
+      }
+      if (c == '\\') {
+        escaping = true;
+        continue;
+      }
+      if (c == '"') {
+        in_quotes = !in_quotes;
+        continue;
+      }
+      if (!in_quotes && std::isspace(static_cast<unsigned char>(c)) != 0) {
+        if (!current.empty()) {
+          out_args.push_back(current);
+          current.clear();
+        }
+        continue;
+      }
+      current.push_back(c);
+    }
+
+    if (escaping || in_quotes) {
+      return false;
+    }
+    if (!current.empty()) {
+      out_args.push_back(current);
+    }
+    return true;
+  };
+
   std::vector<std::string> parts;
-  std::string tok;
-  while (iss >> tok) {
-    parts.push_back(tok);
+  if (!split_args(args_text, parts)) {
+    err = "invalid quoted argument in start command";
+    return false;
   }
 
   std::vector<std::string> argv_store;
@@ -119,6 +157,14 @@ class DaqService {
     if (!parse_config_from_args_text(args_text, cfg, err)) {
       return "error " + err;
     }
+
+    MySqlLogger mysql_logger;
+    uint32_t resolved_run_number = cfg.run_start;
+    if (!mysql_logger.ResolveRunNumber(cfg.run_start_specified, cfg.run_start, resolved_run_number, err)) {
+      return "error " + err;
+    }
+    cfg.run_start = resolved_run_number;
+    cfg.run_start_specified = true;
 
     std::lock_guard<std::mutex> lock(mu_);
     if (running_) {
@@ -187,6 +233,17 @@ class DaqService {
           last_error_ = "pause failed: daq exited with non-zero";
         }
         return "error pause failed";
+      }
+      if (published_events_ > 0) {
+        MySqlLogger mysql_logger;
+        std::string mysql_error;
+        const uint32_t paused_run = current_run_number_locked();
+        const uint32_t paused_subrun = current_subrun_number_locked();
+        if (!mysql_logger.UpdateSubrunStatus(paused_run, paused_subrun, "paused", mysql_error)) {
+          state_ = "error";
+          last_error_ = "failed to update paused status in MySQL: " + mysql_error;
+          return "error " + last_error_;
+        }
       }
       const uint32_t current_run = current_run_number_locked();
       active_cfg_.run_start = current_run + 1;
