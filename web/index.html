@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DAQ Control</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1 id="page_title">DAQ Control Panel</h1>
+
+    <section class="panel">
+      <div id="msg" class="msg"></div>
+      <div class="actions">
+        <button class="primary" id="btn_start">Start</button>
+        <button class="warn" id="btn_pause">Pause</button>
+        <button class="primary" id="btn_resume">Resume</button>
+        <button class="danger" id="btn_stop">Stop</button>
+        <button id="btn_refresh_status">Refresh</button>
+      </div> 
+      <div class="status-simple">
+        <div class="status-top">
+          <div class="lamp-wrap">
+            <span id="health_lamp" class="lamp"></span>
+            <span id="health_text">Unknown</span>
+          </div>
+          <div class="lamp-wrap">
+            <span id="state_lamp" class="lamp"></span>
+            <span id="status_state">-</span>
+          </div>
+        </div>
+        <div class="status-line">
+          <span class="status-item">Run<strong id="status_run">-</strong></span>
+          <span class="status-item">Subrun<strong id="status_subrun">-</strong></span>
+          <span class="status-item">Events Total<strong id="status_events_total">0</strong></span>
+          <span class="status-item">DAQ time<strong id="status_uptime">0s</strong></span>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress-label">
+            <span>Events in file</span>
+            <span id="status_file_progress_text">0 / 0</span>
+          </div>
+          <div class="progress-bar">
+            <div id="status_file_progress_fill" class="progress-fill"></div>
+          </div>
+        </div>
+        <div id="status_error" class="status-error"></div>
+      </div>
+      <div class="row"><label for="comment">Comment</label><input id="comment" placeholder="optional" /></div>     
+      <div class="row"><label for="events_per_file">Events Per File (Sub Run)</label><input id="events_per_file" type="number" min="1" value="100000" /></div>
+      <div class="row"><label for="startup_connect_timeout_sec">Startup Connect Timeout [s]</label><input id="startup_connect_timeout_sec" type="number" min="1" value="5" /></div>
+      <div class="row"><label for="reconnect_failure_timeout_sec">Reconnect Failure Timeout [s]</label><input id="reconnect_failure_timeout_sec" type="number" min="1" value="10" /></div>
+      <div class="actions">
+        <button class="primary" id="btn_start_daqd">Start daqd</button>
+        <button class="danger" id="btn_shutdown">Shutdown daqd</button>
+      </div>      
+      <div class="daqd-log-wrap">
+        <div class="toolbar">
+          <h2 style="margin:0;">daqd log</h2>
+          <div>
+            <button id="btn_refresh_daqd_log">Refresh log</button>
+          </div>
+        </div>
+        <pre id="daqd_log_view" class="daqd-log-view"></pre>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:16px;">
+      <h2>Devices</h2>
+      <div class="device-split">
+        <div class="device-pane">
+          <h3>Registered</h3>
+          <div style="overflow:auto; margin-top:8px;">
+            <table>
+              <thead>
+                <tr><th>frontend</th><th>parameters</th><th>action</th></tr>
+              </thead>
+              <tbody id="devices_tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="device-pane">
+          <h3>Add Device</h3>
+          <div class="row"><label for="frontend_select">Frontend</label><select id="frontend_select"></select></div>
+          <div id="device_fields"></div>
+          <div class="actions" style="margin-top:0;">
+            <button id="btn_add_device">Add Device</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:16px;">
+      <div class="toolbar">
+        <h2 style="margin:0;">Run Log</h2>
+        <div>
+          <button id="btn_refresh_runlog">Refresh Run Log</button>
+        </div>
+      </div>
+      <div style="overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>run</th><th>subrun</th><th>nevents</th><th>start_time</th><th>end_time</th><th>status</th><th>comment</th>
+            </tr>
+          </thead>
+          <tbody id="runlog_tbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

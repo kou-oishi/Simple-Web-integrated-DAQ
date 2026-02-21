@@ -1,0 +1,25 @@
+{
+  "title": "KC705 TOF DAQ",
+  "daqd_path": "build/daqd",
+  "daqd_log_path": "logs/daqd.log",
+  "output_dir": "./test",
+  "events_per_subrun": 100,
+  "startup_connect_timeout_sec": 2,
+  "reconnect_failure_timeout_sec": 5,
+  "comment": "",
+  "run_log_limit": 50,
+  "devices": [
+    {
+      "frontend": "kc705_tof",
+      "board_id": 0,
+      "host": "127.0.0.1",
+      "port": 9101
+    },
+    {
+      "frontend": "kc705_tof",
+      "board_id": 1,
+      "host": "127.0.0.2",
+      "port": 9101
+    }
+  ]
+}
