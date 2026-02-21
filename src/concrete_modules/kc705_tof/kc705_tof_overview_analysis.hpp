@@ -35,6 +35,7 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
 class Kc705TofOverviewAnalysisFactory final : public IMonitorRealtimeAnalysisFactory {
  public:
   const char* Name() const override;
+  const char* Title() const override;
   const char* ExpectedDecoder() const override;
   bool Create(const ParsedAnalysisSpec& spec,
               std::unique_ptr<IRealtimeAnalysis>& out_analysis,

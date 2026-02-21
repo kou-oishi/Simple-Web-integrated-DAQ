@@ -23,6 +23,11 @@ Example config (`web/defaults.json`):
   "title": "TOF DAQ Control",
   "daqd_path": "build/daqd",
   "daqd_log_path": "logs/daqd.log",
+  "datamon_path": "build/datamon",
+  "datamon_log_path": "logs/datamon.log",
+  "datamon_snapshot_dir": "/tmp/daq_monitors",
+  "datamon_snapshot_interval_sec": 1.0,
+  "datamon_snapshot_select_endpoint": "ipc:///tmp/daq_monitors/select_analysis.sock",
   "output_dir": "./output",
   "events_per_subrun": 100000,
   "startup_connect_timeout_sec": 5,
@@ -30,6 +35,9 @@ Example config (`web/defaults.json`):
   "comment": "",
   "main_run_log_limit": 50,
   "run_log_page_limit": 200,
+  "datamon_log_limit": 300,
+  "datamon_decoder": "kc705_tof",
+  "datamon_analyses": ["kc705_tof_overview"],
   "run_log_limit": 50,
   "devices": [
     { "frontend": "kc705_tof", "board_id": 1, "host": "127.0.0.2", "port": 9101 }
@@ -43,6 +51,13 @@ Example config (`web/defaults.json`):
 - `GET /api/status`
 - `GET /api/ui-config`
 - `GET /api/frontends`
+- `GET /api/monitor/modules`
+- `GET /api/monitor/status`
+- `GET /api/monitor/log`
+- `GET /api/monitor/screens`
+- `POST /api/monitor/start`
+- `POST /api/monitor/shutdown`
+- `POST /api/monitor/selected-analysis`
 - `POST /api/start`
 - `POST /api/pause`
 - `POST /api/resume`
@@ -61,6 +76,8 @@ Device fields are obtained at runtime from `GET /api/frontends` and are validate
 - `SIMPLEDAQ_DAQCTL`
 - `SIMPLEDAQ_DAQD`
 - `SIMPLEDAQ_DAQD_LOG`
+- `SIMPLEDAQ_DATAMON`
+- `SIMPLEDAQ_DATAMON_LOG`
 - `SIMPLEDAQ_CTRL_ENDPOINT`
 - `SIMPLEDAQ_MYSQL_HOST`
 - `SIMPLEDAQ_MYSQL_PORT`

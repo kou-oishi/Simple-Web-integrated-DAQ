@@ -83,6 +83,7 @@ class IMonitorRealtimeAnalysisFactory {
   virtual ~IMonitorRealtimeAnalysisFactory() = default;
 
   virtual const char* Name() const = 0;
+  virtual const char* Title() const { return Name(); }
   virtual const char* ExpectedDecoder() const = 0;
   virtual bool Create(const ParsedAnalysisSpec& spec,
                       std::unique_ptr<IRealtimeAnalysis>& out_analysis,

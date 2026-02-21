@@ -40,7 +40,82 @@ struct Options {
   bool no_console = false;
   std::string root_out;
   std::vector<std::string> analyses;
+  bool no_gui = false;
+  std::string snapshot_dir;
+  uint32_t snapshot_interval_ms = 1000;
+  std::string snapshot_select_endpoint;
+  bool list_modules = false;
+  bool json_output = false;
 };
+
+std::string json_escape(const std::string& text) {
+  std::string out;
+  out.reserve(text.size() + 8);
+  for (const char ch : text) {
+    switch (ch) {
+      case '\\':
+        out += "\\\\";
+        break;
+      case '"':
+        out += "\\\"";
+        break;
+      case '\n':
+        out += "\\n";
+        break;
+      case '\r':
+        out += "\\r";
+        break;
+      case '\t':
+        out += "\\t";
+        break;
+      default:
+        out.push_back(ch);
+        break;
+    }
+  }
+  return out;
+}
+
+void print_modules_json() {
+  const auto decoders = ListMonitorDecoderFactories();
+  const auto analyses = ListRealtimeAnalysisFactories();
+
+  std::cout << "{\"decoders\":[";
+  for (std::size_t i = 0; i < decoders.size(); ++i) {
+    if (i > 0) {
+      std::cout << ",";
+    }
+    std::string title = decoders[i];
+    if (const auto* factory = FindMonitorDecoderFactory(decoders[i])) {
+      if (factory->Title() != nullptr) {
+        title = factory->Title();
+      }
+    }
+    std::cout << "{\"name\":\"" << json_escape(decoders[i]) << "\",\"title\":\"" << json_escape(title) << "\"}";
+  }
+  std::cout << "],\"analyses\":[";
+  for (std::size_t i = 0; i < analyses.size(); ++i) {
+    if (i > 0) {
+      std::cout << ",";
+    }
+    std::string expected_decoder;
+    if (const auto* factory = FindRealtimeAnalysisFactory(analyses[i])) {
+      if (factory->ExpectedDecoder() != nullptr) {
+        expected_decoder = factory->ExpectedDecoder();
+      }
+      std::string title = analyses[i];
+      if (factory->Title() != nullptr) {
+        title = factory->Title();
+      }
+      std::cout << "{\"name\":\"" << json_escape(analyses[i]) << "\",\"title\":\"" << json_escape(title)
+                << "\",\"expected_decoder\":\"" << json_escape(expected_decoder) << "\"}";
+      continue;
+    }
+    std::cout << "{\"name\":\"" << json_escape(analyses[i]) << "\",\"title\":\"" << json_escape(analyses[i])
+              << "\",\"expected_decoder\":\"" << json_escape(expected_decoder) << "\"}";
+  }
+  std::cout << "]}\n";
+}
 
 void print_usage(const char* prog) {
   std::cerr << "Usage: " << prog
@@ -61,6 +136,12 @@ void print_usage(const char* prog) {
   std::cerr << "  -n, --no-console              Disable default console sink\n";
   std::cerr << "  -O, --root-out <file.root>    Write decoded events to ROOT TTree output\n";
   std::cerr << "  -a, --analysis <Name[=spec]>  Enable realtime analysis module (repeatable)\n";
+  std::cerr << "      --no-gui                  Disable ROOT GUI event loop (batch mode)\n";
+  std::cerr << "      --snapshot-dir <dir>      Save analysis canvas snapshots as PNG files\n";
+  std::cerr << "      --snapshot-interval-ms <n> Snapshot interval in milliseconds (default: 1000)\n";
+  std::cerr << "      --snapshot-select-endpoint <ep> ZMQ REP endpoint for selected analysis control\n";
+  std::cerr << "      --list-modules            Print available decoders and analyses, then exit\n";
+  std::cerr << "      --json                    Use JSON output with --list-modules\n";
   std::cerr << "  -h, --help                    Show this help\n";
 }
 
@@ -102,6 +183,12 @@ bool parse_args(int argc, char** argv, Options& options) {
       {"no-console", no_argument, nullptr, 'n'},
       {"root-out", required_argument, nullptr, 'O'},
       {"analysis", required_argument, nullptr, 'a'},
+      {"no-gui", no_argument, nullptr, 1002},
+      {"snapshot-dir", required_argument, nullptr, 1003},
+      {"snapshot-interval-ms", required_argument, nullptr, 1004},
+      {"snapshot-select-endpoint", required_argument, nullptr, 1005},
+      {"list-modules", no_argument, nullptr, 1000},
+      {"json", no_argument, nullptr, 1001},
       {"help", no_argument, nullptr, 'h'},
       {nullptr, 0, nullptr, 0},
   };
@@ -114,6 +201,27 @@ bool parse_args(int argc, char** argv, Options& options) {
       break;
     }
     switch (c) {
+      case 1000:
+        options.list_modules = true;
+        break;
+      case 1001:
+        options.json_output = true;
+        break;
+      case 1002:
+        options.no_gui = true;
+        break;
+      case 1003:
+        options.snapshot_dir = optarg;
+        break;
+      case 1004:
+        if (!parse_uint32(optarg, options.snapshot_interval_ms) || options.snapshot_interval_ms == 0) {
+          std::cerr << "Invalid --snapshot-interval-ms. Expected integer > 0\n";
+          return false;
+        }
+        break;
+      case 1005:
+        options.snapshot_select_endpoint = optarg;
+        break;
       case 'l':
         options.live_output_dir = optarg;
         break;
@@ -206,6 +314,10 @@ bool parse_args(int argc, char** argv, Options& options) {
     options.data_endpoint = daq_defaults::kDataEndpoint;
   }
 
+  if (options.list_modules) {
+    return true;
+  }
+
   if (!options.input_file.empty() && options.root_out.empty() && options.no_console && !options.text_stream &&
       options.analyses.empty()) {
     std::cerr << "When --no-console is set, specify --root-out, --text-stream, and/or --analysis\n";
@@ -241,6 +353,23 @@ int main(int argc, char** argv) {
   if (!parse_args(argc, argv, options)) {
     print_usage(argv[0]);
     return 1;
+  }
+
+  if (options.list_modules) {
+    if (options.json_output) {
+      print_modules_json();
+    } else {
+      std::cout << "Decoders:";
+      for (const auto& Name : ListMonitorDecoderFactories()) {
+        std::cout << " " << Name;
+      }
+      std::cout << "\nAnalyses:";
+      for (const auto& Name : ListRealtimeAnalysisFactories()) {
+        std::cout << " " << Name;
+      }
+      std::cout << "\n";
+    }
+    return 0;
   }
 
   std::string decoder_name;
@@ -295,7 +424,9 @@ int main(int argc, char** argv) {
   if (!options.analyses.empty()) {
 #if defined(SIMPLEDAQ_HAS_ROOT) && SIMPLEDAQ_HAS_ROOT
     std::vector<std::unique_ptr<IRealtimeAnalysis>> analyses;
+    std::vector<std::string> analysis_names;
     analyses.reserve(options.analyses.size());
+    analysis_names.reserve(options.analyses.size());
     for (const auto& analysis_arg : options.analyses) {
       std::string analysis_name;
       std::string analysis_spec;
@@ -344,8 +475,15 @@ int main(int argc, char** argv) {
         return 1;
       }
       analyses.push_back(std::move(analysis));
+      analysis_names.push_back(analysis_name);
     }
-    sinks.push_back(std::make_unique<RealtimeAnalysisSink>(std::move(analyses)));
+    RealtimeAnalysisSink::Options sink_options;
+    sink_options.enable_gui = !options.no_gui;
+    sink_options.snapshot_dir = options.snapshot_dir;
+    sink_options.snapshot_interval_ms = options.snapshot_interval_ms;
+    sink_options.snapshot_select_endpoint = options.snapshot_select_endpoint;
+    sinks.push_back(
+        std::make_unique<RealtimeAnalysisSink>(std::move(analyses), std::move(analysis_names), std::move(sink_options)));
 #else
     std::cerr << "This build does not support realtime analysis. Rebuild with ROOT installed.\n";
     return 1;

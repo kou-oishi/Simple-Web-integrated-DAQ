@@ -101,6 +101,8 @@ bool Kc705TofDecoder::FormatDecoded(const DecodedMessage& message, std::string& 
 
 const char* Kc705TofDecoderFactory::Name() const { return "kc705_tof"; }
 
+const char* Kc705TofDecoderFactory::Title() const { return "KC705 TOF Decoder"; }
+
 bool Kc705TofDecoderFactory::Create(const std::string& spec,
                                     std::unique_ptr<IDecoder>& out_decoder,
                                     std::size_t& out_frame_size,

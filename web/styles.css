@@ -298,6 +298,117 @@ th { color: var(--muted); font-weight: 600; }
   color: var(--muted);
 }
 
+.monitor-modules {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.monitor-pane {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: #fbfcfd;
+}
+
+.monitor-pane h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.check-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.check-help {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.analysis-grid {
+  --analysis-image-width: 520px;
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.analysis-card {
+  width: var(--analysis-image-width);
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px;
+  background: #fbfcfd;
+}
+
+.analysis-card-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.analysis-image {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  cursor: zoom-in;
+}
+
+.analysis-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.analysis-controls input[type="range"] {
+  width: 260px;
+}
+
+.image-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 16, 24, 0.86);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.image-overlay.hidden {
+  display: none;
+}
+
+.image-overlay-img {
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  width: auto;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+  cursor: zoom-out;
+}
+
 .daqd-log-view {
   margin: 8px 0 0;
   max-height: 120px;
@@ -337,5 +448,6 @@ th { color: var(--muted); font-weight: 600; }
     position: static;
   }
   .device-split { grid-template-columns: 1fr; }
+  .monitor-modules { grid-template-columns: 1fr; }
   .row { grid-template-columns: 1fr; }
 }

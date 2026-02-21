@@ -1,8 +1,16 @@
 {
   "title": "KC705 TOF DAQ",
-  "daqd_path": "build/daqd",
-  "daqd_log_path": "logs/daqd.log",
   "output_dir": "./test",
+  
+  "daqd_path": "build/daqd",
+  "datamon_path": "build/datamon",
+  "daqd_log_path": "logs/daqd.log",
+  "datamon_log_path": "logs/datamon.log",
+  "datamon_state_path": "/tmp/daq_monitors/datamon_state.json",
+  "datamon_snapshot_dir": "/tmp/daq_monitors",
+  "datamon_snapshot_select_endpoint": "ipc:///tmp/daq_monitors/select_analysis.sock",
+  "datamon_snapshot_interval_sec": 1.0,
+  
   "events_per_subrun": 100,
   "startup_connect_timeout_sec": 2,
   "reconnect_failure_timeout_sec": 5,
@@ -10,6 +18,11 @@
   "main_run_log_limit": 10,
   "run_log_page_limit": 200,
   "run_log_limit": 50,
+  "datamon_log_limit": 300,
+  "datamon_decoder": "kc705_tof",
+  "datamon_analyses": [
+    "kc705_tof_overview"
+  ],
   "devices": [
     {
       "frontend": "kc705_tof",

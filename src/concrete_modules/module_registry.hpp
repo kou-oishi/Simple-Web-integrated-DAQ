@@ -14,6 +14,7 @@ class IMonitorDecoderFactory {
   virtual ~IMonitorDecoderFactory() = default;
 
   virtual const char* Name() const = 0;
+  virtual const char* Title() const { return Name(); }
   virtual bool Create(const std::string& spec,
                       std::unique_ptr<IDecoder>& out_decoder,
                       std::size_t& out_frame_size,
@@ -53,4 +54,3 @@ std::vector<std::string> ListRealtimeAnalysisFactories();
   const bool SIMPLEDAQ_CONCAT_(kRegisterAnalysis_, __COUNTER__) =                                         \
       RegisterRealtimeAnalysisFactory(&(FACTORY_GETTER_FN()));                                            \
   }
-

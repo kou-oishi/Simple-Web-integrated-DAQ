@@ -59,6 +59,34 @@
         </section>
 
         <section class="panel" style="margin-top:16px;">
+          <div class="toolbar">
+            <h2 style="margin:0;">Monitor / Decoder / Analysis</h2>
+            <div class="lamp-wrap">
+              <span id="monitor_health_lamp" class="lamp"></span>
+              <span id="monitor_health_text">Unknown</span>
+            </div>
+          </div>
+          <div id="monitor_status_error" class="status-error"></div>
+          <div class="row"><label for="monitor_snapshot_interval_sec">Monitor Image Refresh [s]</label><input id="monitor_snapshot_interval_sec" type="number" min="0.1" step="0.1" value="1.0" /></div>
+          <div class="monitor-modules">
+            <div class="monitor-pane">
+              <h3>Decoders</h3>
+              <div id="monitor_decoders" class="check-list"></div>
+            </div>
+            <div class="monitor-pane">
+              <h3>Analysis modules</h3>
+              <div id="monitor_analyses" class="check-list"></div>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="primary" id="btn_start_datamon">Start monitor</button>
+            <button class="danger" id="btn_shutdown_datamon">Shutdown monitor</button>
+            <button id="btn_refresh_datamon_log">Refresh log</button>
+          </div>
+          <pre id="datamon_log_view" class="daqd-log-view"></pre>
+        </section>
+
+        <section class="panel" style="margin-top:16px;">
           <h2>Devices</h2>
           <div class="device-split">
             <div class="device-pane">
@@ -105,6 +133,7 @@
     </main>
   </div>
   <script src="/status_panel.js" defer></script>
+  <script src="/sidebar.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

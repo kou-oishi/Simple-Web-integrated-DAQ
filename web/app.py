@@ -5,8 +5,10 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -14,16 +16,30 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+try:
+    import zmq  # type: ignore
+except Exception:  # pragma: no cover
+    zmq = None
+
 APP_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = APP_ROOT.parent
 DEFAULTS_HPP = REPO_ROOT / "src" / "core" / "defaults.hpp"
 DEFAULT_DAQCTL = REPO_ROOT / "build" / "daqctl"
 DEFAULT_DAQD = REPO_ROOT / "build" / "daqd"
+DEFAULT_DATAMON = REPO_ROOT / "build" / "datamon"
 DEFAULT_WEB_CONFIG = APP_ROOT / "defaults.json"
 DAQCTL_TIMEOUT_SEC = 2
 
 _DAQD_LOCK = threading.Lock()
 _DAQD_PROC: subprocess.Popen[Any] | None = None
+_DATAMON_LOCK = threading.Lock()
+_DATAMON_PROC: subprocess.Popen[Any] | None = None
+_DATAMON_PID: int | None = None
+_DATAMON_LAST_EXIT_CODE = 0
+_DATAMON_ACTIVE_DECODER: dict[str, str] | None = None
+_DATAMON_ACTIVE_ANALYSES: list[dict[str, str]] = []
+_DATAMON_SELECTED_ANALYSIS = ""
+_MONITOR_CTRL_LOCK = threading.Lock()
 
 
 def _load_defaults() -> dict[str, str]:
@@ -86,6 +102,29 @@ def _resolve_daqd_log_path() -> Path:
 DAQD_LOG_PATH = _resolve_daqd_log_path()
 
 
+def _resolve_datamon_log_path() -> Path:
+    configured = WEB_CONFIG.get("datamon_log_path") or os.getenv("SIMPLEDAQ_DATAMON_LOG") or "logs/datamon.log"
+    return _resolve_repo_path(str(configured))
+
+
+DATAMON_LOG_PATH = _resolve_datamon_log_path()
+
+
+def _resolve_snapshot_select_endpoint() -> str:
+    return str(WEB_CONFIG.get("datamon_snapshot_select_endpoint") or "ipc:///tmp/daq_monitors/select_analysis.sock")
+
+
+SNAPSHOT_SELECT_ENDPOINT = _resolve_snapshot_select_endpoint()
+
+
+def _resolve_datamon_state_path() -> Path:
+    configured = WEB_CONFIG.get("datamon_state_path") or "/tmp/daq_monitors/datamon_state.json"
+    return _resolve_repo_path(str(configured))
+
+
+DATAMON_STATE_PATH = _resolve_datamon_state_path()
+
+
 def _run_cmd(args: list[str], timeout_sec: int = 30) -> tuple[int, str, str]:
     try:
         proc = subprocess.run(
@@ -101,6 +140,61 @@ def _run_cmd(args: list[str], timeout_sec: int = 30) -> tuple[int, str, str]:
         return 124, (ex.stdout or "").strip(), f"timeout after {timeout_sec}s"
     except OSError as ex:
         return 127, "", str(ex)
+
+
+def _is_pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _read_datamon_state() -> dict[str, Any]:
+    if not DATAMON_STATE_PATH.exists():
+        return {}
+    try:
+        data = json.loads(DATAMON_STATE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_datamon_state(state: dict[str, Any]) -> None:
+    DATAMON_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DATAMON_STATE_PATH.write_text(json.dumps(state, ensure_ascii=True, separators=(",", ":")), encoding="utf-8")
+
+
+def _clear_datamon_state_file() -> None:
+    try:
+        DATAMON_STATE_PATH.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _persist_datamon_state() -> None:
+    if _DATAMON_PID is None or _DATAMON_PID <= 0:
+        _clear_datamon_state_file()
+        return
+    state: dict[str, Any] = {
+        "pid": int(_DATAMON_PID),
+        "last_exit": int(_DATAMON_LAST_EXIT_CODE),
+        "selected_analysis": str(_DATAMON_SELECTED_ANALYSIS),
+    }
+    if _DATAMON_ACTIVE_DECODER is not None:
+        state["active_decoder"] = _DATAMON_ACTIVE_DECODER
+    if isinstance(_DATAMON_ACTIVE_ANALYSES, list):
+        state["active_analyses"] = _DATAMON_ACTIVE_ANALYSES
+    try:
+        _write_datamon_state(state)
+    except Exception:
+        pass
 
 
 def _daqctl_base_args() -> list[str]:
@@ -126,6 +220,26 @@ def _daqd_base_args() -> list[str]:
         "--log-file",
         str(DAQD_LOG_PATH),
     ]
+
+
+def _datamon_base_args() -> list[str]:
+    datamon_path_text = WEB_CONFIG.get("datamon_path") or os.getenv("SIMPLEDAQ_DATAMON") or str(DEFAULT_DATAMON)
+    datamon_path = _resolve_repo_path(str(datamon_path_text))
+    data_endpoint = os.getenv("SIMPLEDAQ_DATA_ENDPOINT") or DEFAULTS.get("kDataEndpoint") or "ipc:///tmp/simpledaq_data.sock"
+    args = [str(datamon_path), "--data-endpoint", data_endpoint]
+    poll_ms = WEB_CONFIG.get("datamon_poll_ms")
+    if poll_ms is not None:
+        try:
+            args.extend(["--poll-ms", str(int(poll_ms))])
+        except Exception:
+            pass
+    idle_timeout_sec = WEB_CONFIG.get("datamon_idle_timeout_sec")
+    if idle_timeout_sec is not None:
+        try:
+            args.extend(["--idle-timeout-sec", str(int(idle_timeout_sec))])
+        except Exception:
+            pass
+    return args
 
 
 def _mysql_base_args() -> tuple[list[str], dict[str, str]]:
@@ -219,6 +333,81 @@ def _is_daqd_running() -> tuple[bool, int | None]:
         return True, _DAQD_PROC.pid
 
 
+def _is_datamon_running() -> tuple[bool, int | None]:
+    global _DATAMON_PROC
+    global _DATAMON_PID
+    global _DATAMON_LAST_EXIT_CODE
+    global _DATAMON_ACTIVE_DECODER
+    global _DATAMON_ACTIVE_ANALYSES
+    global _DATAMON_SELECTED_ANALYSIS
+    with _DATAMON_LOCK:
+        if _DATAMON_PROC is not None:
+            rc = _DATAMON_PROC.poll()
+            if rc is None:
+                _DATAMON_PID = _DATAMON_PROC.pid
+                _persist_datamon_state()
+                return True, _DATAMON_PID
+            _DATAMON_LAST_EXIT_CODE = int(rc)
+            _DATAMON_PROC = None
+            _DATAMON_PID = None
+            _DATAMON_ACTIVE_DECODER = None
+            _DATAMON_ACTIVE_ANALYSES = []
+            _DATAMON_SELECTED_ANALYSIS = ""
+            _clear_datamon_state_file()
+            return False, None
+
+        if _DATAMON_PID is None:
+            state = _read_datamon_state()
+            pid_raw = state.get("pid")
+            try:
+                pid = int(pid_raw)
+            except Exception:
+                pid = 0
+            if pid > 0:
+                _DATAMON_PID = pid
+                decoder = state.get("active_decoder")
+                analyses = state.get("active_analyses")
+                selected = state.get("selected_analysis")
+                if isinstance(decoder, dict):
+                    _DATAMON_ACTIVE_DECODER = decoder
+                if isinstance(analyses, list):
+                    _DATAMON_ACTIVE_ANALYSES = analyses
+                if isinstance(selected, str):
+                    _DATAMON_SELECTED_ANALYSIS = selected
+                try:
+                    _DATAMON_LAST_EXIT_CODE = int(state.get("last_exit", _DATAMON_LAST_EXIT_CODE))
+                except Exception:
+                    pass
+
+        if _DATAMON_PID is not None and _is_pid_alive(_DATAMON_PID):
+            return True, _DATAMON_PID
+
+        _DATAMON_PID = None
+        _DATAMON_ACTIVE_DECODER = None
+        _DATAMON_ACTIVE_ANALYSES = []
+        _DATAMON_SELECTED_ANALYSIS = ""
+        _clear_datamon_state_file()
+        return False, None
+
+
+def _load_monitor_modules() -> dict[str, Any]:
+    cmd = [*_datamon_base_args()[:1], "--list-modules", "--json"]
+    rc, out, err = _run_cmd(cmd, timeout_sec=DAQCTL_TIMEOUT_SEC)
+    if rc != 0:
+        raise HTTPException(status_code=500, detail={"error": "datamon module list failed", "stderr": err, "stdout": out})
+    try:
+        payload = json.loads(out)
+    except json.JSONDecodeError as ex:
+        raise HTTPException(status_code=500, detail={"error": f"invalid datamon modules payload: {ex}", "payload": out}) from ex
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=500, detail={"error": "invalid datamon modules schema"})
+    decoders = payload.get("decoders")
+    analyses = payload.get("analyses")
+    if not isinstance(decoders, list) or not isinstance(analyses, list):
+        raise HTTPException(status_code=500, detail={"error": "invalid datamon modules schema content"})
+    return {"decoders": decoders, "analyses": analyses}
+
+
 def _tail_lines(path: Path, limit: int) -> list[str]:
     if limit <= 0 or not path.exists():
         return []
@@ -228,6 +417,37 @@ def _tail_lines(path: Path, limit: int) -> list[str]:
     except Exception:
         return []
     return [line.rstrip("\n") for line in lines[-limit:]]
+
+
+def _send_selected_analysis(module: str, max_attempts: int = 6, send_timeout_ms: int = 120, recv_timeout_ms: int = 120) -> None:
+    if zmq is None:
+        raise RuntimeError("pyzmq is not available")
+    text = module.strip()
+    endpoint = SNAPSHOT_SELECT_ENDPOINT
+    if endpoint.startswith("ipc://"):
+        socket_path = endpoint[len("ipc://") :]
+        if socket_path:
+            Path(socket_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
+    last_error: Exception | None = None
+    with _MONITOR_CTRL_LOCK:
+        for _ in range(max(1, int(max_attempts))):
+            ctx = zmq.Context.instance()
+            sock = ctx.socket(zmq.REQ)
+            try:
+                sock.setsockopt(zmq.LINGER, 0)
+                sock.setsockopt(zmq.SNDTIMEO, int(send_timeout_ms))
+                sock.setsockopt(zmq.RCVTIMEO, int(recv_timeout_ms))
+                sock.connect(endpoint)
+                sock.send_string(text)
+                sock.recv()
+                return
+            except Exception as ex:  # pragma: no cover
+                last_error = ex
+                time.sleep(0.03)
+            finally:
+                sock.close()
+    if last_error is not None:
+        raise last_error
 
 
 class StartRequest(BaseModel):
@@ -242,6 +462,16 @@ class StartRequest(BaseModel):
     comment: str | None = None
 
 
+class MonitorStartRequest(BaseModel):
+    decoder: str | None = None
+    analyses: list[str] | None = None
+    snapshot_interval_sec: float | None = Field(default=None, gt=0)
+
+
+class MonitorSelectionRequest(BaseModel):
+    module: str | None = None
+
+
 app = FastAPI(title="SimpleDAQ Web API", version="0.1.0")
 
 
@@ -253,6 +483,11 @@ def index() -> FileResponse:
 @app.get("/run-log")
 def runlog_page() -> FileResponse:
     return FileResponse(APP_ROOT / "runlog.html")
+
+
+@app.get("/analysis")
+def analysis_page() -> FileResponse:
+    return FileResponse(APP_ROOT / "analysis.html")
 
 
 @app.get("/styles.css")
@@ -273,6 +508,16 @@ def app_js() -> FileResponse:
 @app.get("/runlog.js")
 def runlog_js() -> FileResponse:
     return FileResponse(APP_ROOT / "runlog.js", media_type="application/javascript")
+
+
+@app.get("/analysis.js")
+def analysis_js() -> FileResponse:
+    return FileResponse(APP_ROOT / "analysis.js", media_type="application/javascript")
+
+
+@app.get("/sidebar.js")
+def sidebar_js() -> FileResponse:
+    return FileResponse(APP_ROOT / "sidebar.js", media_type="application/javascript")
 
 
 @app.get("/status_panel.js")
@@ -322,6 +567,297 @@ def get_daqd_log(limit: int = Query(default=50, ge=1, le=500)) -> dict[str, Any]
     return {"running": running, "pid": pid, "lines": lines, "path": str(DAQD_LOG_PATH)}
 
 
+@app.get("/api/monitor/log")
+def get_datamon_log(limit: int = Query(default=50, ge=1, le=500)) -> dict[str, Any]:
+    lines = _tail_lines(DATAMON_LOG_PATH, limit)
+    running, pid = _is_datamon_running()
+    return {"running": running, "pid": pid, "lines": lines, "path": str(DATAMON_LOG_PATH)}
+
+
+@app.get("/api/monitor/modules")
+def get_monitor_modules() -> dict[str, Any]:
+    return _load_monitor_modules()
+
+
+@app.get("/api/monitor/status")
+def get_monitor_status() -> dict[str, Any]:
+    running, pid = _is_datamon_running()
+    state = "running" if running else ("error" if _DATAMON_LAST_EXIT_CODE != 0 else "stopped")
+    healthy = 1 if running else 0
+    return {
+        "running": running,
+        "healthy": healthy,
+        "state": state,
+        "pid": pid,
+        "last_exit": _DATAMON_LAST_EXIT_CODE,
+        "active_decoder": _DATAMON_ACTIVE_DECODER if running else None,
+        "active_analyses": _DATAMON_ACTIVE_ANALYSES if running else [],
+        "selected_analysis": _DATAMON_SELECTED_ANALYSIS if running else "",
+    }
+
+
+@app.post("/api/monitor/selected-analysis")
+def set_selected_analysis(req: MonitorSelectionRequest) -> dict[str, Any]:
+    global _DATAMON_SELECTED_ANALYSIS
+    name = (req.module or "").strip()
+    running, _ = _is_datamon_running()
+    _DATAMON_SELECTED_ANALYSIS = name
+    _persist_datamon_state()
+    if not running:
+        return {"result": "queued", "selected_analysis": name, "running": False}
+    try:
+        _send_selected_analysis(name, max_attempts=3, send_timeout_ms=80, recv_timeout_ms=80)
+        return {"result": "ok", "selected_analysis": name, "running": True}
+    except Exception:
+        return {"result": "queued", "selected_analysis": name, "running": True}
+
+
+def _monitor_snapshot_root() -> Path:
+    configured = WEB_CONFIG.get("datamon_snapshot_dir") or "/tmp/daq_monitors"
+    return _resolve_repo_path(str(configured))
+
+
+@app.get("/api/monitor/screens")
+def get_monitor_screens() -> dict[str, Any]:
+    root = _monitor_snapshot_root()
+    title_map: dict[str, str] = {}
+    for item in _DATAMON_ACTIVE_ANALYSES:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        if name == "":
+            continue
+        title = str(item.get("title", name)).strip() or name
+        title_map[name] = title
+    analyses: list[dict[str, Any]] = []
+    if root.exists():
+        for module_dir in sorted([p for p in root.iterdir() if p.is_dir()], key=lambda p: p.name):
+            images = []
+            for png in sorted(module_dir.glob("*.png"), key=lambda p: p.name):
+                try:
+                    mtime = int(png.stat().st_mtime)
+                except Exception:
+                    mtime = 0
+                rel = png.relative_to(root).as_posix()
+                images.append({"name": png.name, "path": rel, "url": f"/monitor-snapshots/{rel}?t={mtime}"})
+            analyses.append({"name": module_dir.name, "title": title_map.get(module_dir.name, module_dir.name), "images": images})
+    return {"analyses": analyses}
+
+
+@app.get("/monitor-snapshots/{relative_path:path}")
+def get_monitor_snapshot(relative_path: str) -> FileResponse:
+    root = _monitor_snapshot_root().resolve()
+    target = (root / relative_path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as ex:
+        raise HTTPException(status_code=400, detail={"error": "invalid snapshot path"}) from ex
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail={"error": "snapshot not found"})
+    return FileResponse(target)
+
+
+@app.post("/api/monitor/start")
+def start_datamon(req: MonitorStartRequest) -> dict[str, Any]:
+    global _DATAMON_PROC
+    global _DATAMON_PID
+    global _DATAMON_LAST_EXIT_CODE
+    global _DATAMON_ACTIVE_DECODER
+    global _DATAMON_ACTIVE_ANALYSES
+    global _DATAMON_SELECTED_ANALYSIS
+
+    running, pid = _is_datamon_running()
+    if running:
+        return {"result": "already running", "pid": pid}
+
+    modules = _load_monitor_modules()
+    available_decoders: dict[str, str] = {}
+    for item in modules.get("decoders", []):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        if name == "":
+            continue
+        title = str(item.get("title", name)).strip() or name
+        available_decoders[name] = title
+    available_analyses: dict[str, tuple[str, str]] = {}
+    for item in modules.get("analyses", []):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        if name == "":
+            continue
+        title = str(item.get("title", name)).strip() or name
+        expected = str(item.get("expected_decoder", "")).strip()
+        available_analyses[name] = (title, expected)
+
+    decoder = (req.decoder or str(WEB_CONFIG.get("datamon_decoder", "kc705_tof"))).strip()
+
+    raw_analyses = req.analyses if req.analyses is not None else WEB_CONFIG.get("datamon_analyses", [])
+    if not isinstance(raw_analyses, list):
+        raw_analyses = []
+    selected_analyses: list[str] = []
+    required_decoder = ""
+    for item in raw_analyses:
+        name = str(item).strip()
+        if name == "":
+            continue
+        info = available_analyses.get(name)
+        if info is None:
+            raise HTTPException(status_code=400, detail={"error": f"unsupported analysis '{name}'"})
+        _, expected = info
+        if expected:
+            if required_decoder == "":
+                required_decoder = expected
+            elif required_decoder != expected:
+                raise HTTPException(
+                    status_code=400,
+                    detail={"error": f"analysis decoder conflict: '{required_decoder}' vs '{expected}'"},
+                )
+        selected_analyses.append(name)
+
+    if required_decoder:
+        decoder = required_decoder
+
+    if decoder == "":
+        raise HTTPException(status_code=400, detail={"error": "decoder is required"})
+    if decoder not in available_decoders:
+        raise HTTPException(status_code=400, detail={"error": f"unsupported decoder '{decoder}'"})
+
+    args = [*_datamon_base_args(), "--decoder", decoder, "--text-stream", "--no-gui"]
+    snapshot_dir = str(WEB_CONFIG.get("datamon_snapshot_dir", "/tmp/daq_monitors"))
+    args.extend(["--snapshot-dir", str(_resolve_repo_path(snapshot_dir))])
+    snapshot_interval_ms: int | None = None
+    if req.snapshot_interval_sec is not None:
+        try:
+            snapshot_interval_ms = max(1, int(float(req.snapshot_interval_sec) * 1000.0))
+        except Exception:
+            snapshot_interval_ms = None
+    if snapshot_interval_ms is None:
+        raw_cfg_ms = WEB_CONFIG.get("datamon_snapshot_interval_ms")
+        raw_cfg_sec = WEB_CONFIG.get("datamon_snapshot_interval_sec")
+        if raw_cfg_sec is not None:
+            try:
+                snapshot_interval_ms = max(1, int(float(raw_cfg_sec) * 1000.0))
+            except Exception:
+                snapshot_interval_ms = None
+        if snapshot_interval_ms is None:
+            try:
+                snapshot_interval_ms = int(raw_cfg_ms) if raw_cfg_ms is not None else 1000
+            except Exception:
+                snapshot_interval_ms = 1000
+    try:
+        args.extend(["--snapshot-interval-ms", str(int(snapshot_interval_ms))])
+    except Exception:
+        args.extend(["--snapshot-interval-ms", "1000"])
+    args.extend(["--snapshot-select-endpoint", SNAPSHOT_SELECT_ENDPOINT])
+    for name in selected_analyses:
+        args.extend(["--analysis", name])
+
+    DATAMON_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _DATAMON_LOCK:
+        try:
+            with DATAMON_LOG_PATH.open("a", encoding="utf-8") as log_head:
+                log_head.write("\n=== web requested datamon start ===\n")
+            with DATAMON_LOG_PATH.open("a", encoding="utf-8") as log_out:
+                _DATAMON_PROC = subprocess.Popen(
+                    args,
+                    cwd=str(REPO_ROOT),
+                    stdout=log_out,
+                    stderr=log_out,
+                    text=True,
+                    start_new_session=True,
+                )
+        except Exception as ex:
+            _DATAMON_PROC = None
+            raise HTTPException(status_code=500, detail={"error": f"failed to start datamon: {ex}", "cmd": shlex.join(args)}) from ex
+
+    _DATAMON_LAST_EXIT_CODE = 0
+    _DATAMON_PID = _DATAMON_PROC.pid
+    _DATAMON_ACTIVE_DECODER = {"name": decoder, "title": available_decoders.get(decoder, decoder)}
+    _DATAMON_ACTIVE_ANALYSES = []
+    _DATAMON_SELECTED_ANALYSIS = ""
+    try:
+        _send_selected_analysis("", max_attempts=2, send_timeout_ms=60, recv_timeout_ms=60)
+    except Exception:
+        pass
+    for name in selected_analyses:
+        title = available_analyses.get(name, (name, ""))[0]
+        _DATAMON_ACTIVE_ANALYSES.append({"name": name, "title": title})
+    _persist_datamon_state()
+    return {"result": "datamon started", "pid": _DATAMON_PROC.pid}
+
+
+@app.post("/api/monitor/shutdown")
+def stop_datamon() -> dict[str, Any]:
+    global _DATAMON_PROC
+    global _DATAMON_PID
+    global _DATAMON_LAST_EXIT_CODE
+    global _DATAMON_ACTIVE_DECODER
+    global _DATAMON_ACTIVE_ANALYSES
+    global _DATAMON_SELECTED_ANALYSIS
+
+    with _DATAMON_LOCK:
+        proc = _DATAMON_PROC
+        pid = _DATAMON_PID
+    if proc is None and (pid is None or not _is_pid_alive(pid)):
+        return {"result": "datamon is not running"}
+    rc = 0
+    if proc is not None:
+        try:
+            proc.send_signal(signal.SIGINT)
+            proc.wait(timeout=3)
+        except Exception:
+            try:
+                proc.terminate()
+                proc.wait(timeout=3)
+            except Exception:
+                proc.kill()
+                proc.wait(timeout=3)
+        polled = proc.poll()
+        rc = int(polled) if polled is not None else 0
+    else:
+        assert pid is not None
+        try:
+            os.kill(pid, signal.SIGINT)
+        except Exception:
+            pass
+        deadline = time.time() + 1.0
+        while time.time() < deadline:
+            if not _is_pid_alive(pid):
+                break
+            time.sleep(0.05)
+        if _is_pid_alive(pid):
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except Exception:
+                pass
+            deadline = time.time() + 1.0
+            while time.time() < deadline:
+                if not _is_pid_alive(pid):
+                    break
+                time.sleep(0.05)
+        if _is_pid_alive(pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except Exception:
+                pass
+        rc = 0
+    with _DATAMON_LOCK:
+        _DATAMON_LAST_EXIT_CODE = int(rc)
+        _DATAMON_PROC = None
+        _DATAMON_PID = None
+        _DATAMON_ACTIVE_DECODER = None
+        _DATAMON_ACTIVE_ANALYSES = []
+        _DATAMON_SELECTED_ANALYSIS = ""
+        _clear_datamon_state_file()
+    try:
+        _send_selected_analysis("", max_attempts=1, send_timeout_ms=40, recv_timeout_ms=40)
+    except Exception:
+        pass
+    return {"result": f"datamon stopped (exit={rc})", "exit_code": int(rc)}
+
+
 @app.get("/api/ui-config")
 def get_ui_config() -> dict[str, Any]:
     title = str(WEB_CONFIG.get("title", "DAQ Control"))
@@ -347,6 +883,24 @@ def get_ui_config() -> dict[str, Any]:
         daqd_log_limit = int(daqd_log_limit)
     except Exception:
         daqd_log_limit = 300
+    datamon_log_limit = WEB_CONFIG.get("datamon_log_limit", 300)
+    try:
+        datamon_log_limit = int(datamon_log_limit)
+    except Exception:
+        datamon_log_limit = 300
+    datamon_snapshot_interval_ms = WEB_CONFIG.get("datamon_snapshot_interval_ms")
+    datamon_snapshot_interval_sec = WEB_CONFIG.get("datamon_snapshot_interval_sec")
+    if datamon_snapshot_interval_sec is not None:
+        try:
+            datamon_snapshot_interval_ms = max(1, int(float(datamon_snapshot_interval_sec) * 1000.0))
+        except Exception:
+            datamon_snapshot_interval_ms = None
+    if datamon_snapshot_interval_ms is None:
+        datamon_snapshot_interval_ms = 1000
+    try:
+        datamon_snapshot_interval_ms = int(datamon_snapshot_interval_ms)
+    except Exception:
+        datamon_snapshot_interval_ms = 1000
     startup_connect_timeout_sec = WEB_CONFIG.get(
         "startup_connect_timeout_sec",
         DEFAULTS.get("kStartupConnectTimeoutSec", 5),
@@ -367,6 +921,9 @@ def get_ui_config() -> dict[str, Any]:
     devices = WEB_CONFIG.get("devices", [])
     if not isinstance(devices, list):
         devices = []
+    datamon_analyses = WEB_CONFIG.get("datamon_analyses", [])
+    if not isinstance(datamon_analyses, list):
+        datamon_analyses = []
 
     return {
         "title": title,
@@ -376,6 +933,13 @@ def get_ui_config() -> dict[str, Any]:
         "main_run_log_limit": main_run_log_limit,
         "run_log_page_limit": run_log_page_limit,
         "daqd_log_limit": daqd_log_limit,
+        "datamon_log_limit": datamon_log_limit,
+        "datamon_decoder": str(WEB_CONFIG.get("datamon_decoder", "kc705_tof")),
+        "datamon_analyses": datamon_analyses,
+        "datamon_snapshot_dir": str(WEB_CONFIG.get("datamon_snapshot_dir", "/tmp/daq_monitors")),
+        "datamon_snapshot_interval_ms": datamon_snapshot_interval_ms,
+        "datamon_snapshot_interval_sec": (float(datamon_snapshot_interval_ms) / 1000.0),
+        "datamon_snapshot_select_endpoint": str(WEB_CONFIG.get("datamon_snapshot_select_endpoint", "ipc:///tmp/daq_monitors/select_analysis.sock")),
         "startup_connect_timeout_sec": startup_connect_timeout_sec,
         "reconnect_failure_timeout_sec": reconnect_failure_timeout_sec,
         "devices": devices,

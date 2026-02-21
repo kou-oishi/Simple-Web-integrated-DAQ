@@ -27,6 +27,7 @@ class Kc705TofDecoder final : public IDecoder {
 class Kc705TofDecoderFactory final : public IMonitorDecoderFactory {
  public:
   const char* Name() const override;
+  const char* Title() const override;
   bool Create(const std::string& spec,
               std::unique_ptr<IDecoder>& out_decoder,
               std::size_t& out_frame_size,

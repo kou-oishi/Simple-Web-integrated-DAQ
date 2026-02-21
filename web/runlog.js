@@ -88,6 +88,28 @@ async function callApi(path) {
   return data;
 }
 
+async function postApi(path, payload) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  });
+  let data = null;
+  try { data = await res.json(); } catch (_) {}
+  if (!res.ok) {
+    throw new Error(parseApiError(data, res.status));
+  }
+  return data;
+}
+
+async function setSelectedAnalysis(moduleName) {
+  try {
+    await postApi('/api/monitor/selected-analysis', { module: moduleName || null });
+  } catch (_) {
+    // ignore selection sync failures
+  }
+}
+
 function statusClass(statusText) {
   const s = String(statusText || '').toLowerCase();
   if (s === 'error' || s.includes('fail')) return 'runlog-status-error';
@@ -264,6 +286,6 @@ if (viewSummaryInput) {
 
 ensureStatusPanelElements();
 updateViewLabels();
-loadUiConfig().then(refreshRunLog);
+loadUiConfig().then(() => setSelectedAnalysis(null)).then(refreshRunLog);
 refreshStatus();
 statusTimerId = setInterval(refreshStatus, 1000);

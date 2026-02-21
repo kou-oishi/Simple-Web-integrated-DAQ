@@ -16,10 +16,20 @@ const deviceFields = document.getElementById('device_fields');
 const devicesBody = document.getElementById('devices_tbody');
 const pageTitle = document.getElementById('page_title');
 const daqdLogView = document.getElementById('daqd_log_view');
+const datamonLogView = document.getElementById('datamon_log_view');
+const monitorHealthLamp = document.getElementById('monitor_health_lamp');
+const monitorHealthText = document.getElementById('monitor_health_text');
+const monitorStatusError = document.getElementById('monitor_status_error');
+const monitorDecoders = document.getElementById('monitor_decoders');
+const monitorAnalyses = document.getElementById('monitor_analyses');
 
 let uiConfig = {};
 let frontendCatalog = [];
 let deviceEntries = [];
+let monitorCatalog = { decoders: [], analyses: [] };
+let selectedMonitorDecoder = '';
+let selectedMonitorAnalyses = new Set();
+let monitorSnapshotIntervalSec = 1.0;
 let cachedNextRun = null;
 let cachedNextRunAtMs = 0;
 let daqConnected = false;
@@ -27,7 +37,9 @@ let statusPollInFlight = false;
 let msgSource = '';
 let daqState = '-';
 let runLogLimit = 50;
+let monitorRunning = false;
 const MAIN_FORM_STATE_KEY = 'simpledaq_main_form_state_v1';
+const MONITOR_STATE_KEY = 'simpledaq_monitor_state_v1';
 
 function loadMainFormState() {
   try {
@@ -72,6 +84,43 @@ function bindMainFormStateSave() {
     el.addEventListener('input', saveMainFormState);
     el.addEventListener('change', saveMainFormState);
   });
+}
+
+function bindMonitorStateSave() {
+  const snapshotIntervalInput = document.getElementById('monitor_snapshot_interval_sec');
+  if (snapshotIntervalInput) {
+    const persist = () => {
+      monitorSnapshotIntervalSec = Math.max(0.1, Number(snapshotIntervalInput.value || 1.0));
+      saveMonitorState();
+    };
+    snapshotIntervalInput.addEventListener('input', persist);
+    snapshotIntervalInput.addEventListener('change', persist);
+  }
+}
+
+function loadMonitorState() {
+  try {
+    const raw = window.localStorage.getItem(MONITOR_STATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
+function saveMonitorState() {
+  try {
+    const payload = {
+      decoder: selectedMonitorDecoder || '',
+      analyses: Array.from(selectedMonitorAnalyses.values()),
+      snapshot_interval_sec: Number(monitorSnapshotIntervalSec || 1.0),
+    };
+    window.localStorage.setItem(MONITOR_STATE_KEY, JSON.stringify(payload));
+  } catch (_) {
+    // ignore storage failures
+  }
 }
 
 function setActionButtonsByState(state, running) {
@@ -122,6 +171,125 @@ function setActionButtonsByState(state, running) {
   if (btnResume) btnResume.disabled = true;
   if (btnStop) btnStop.disabled = true;
   if (btnShutdown) btnShutdown.disabled = false;
+}
+
+function setMonitorControlsByState(running) {
+  monitorRunning = running;
+  const btnStart = document.getElementById('btn_start_datamon');
+  const btnShutdown = document.getElementById('btn_shutdown_datamon');
+  const snapshotIntervalInput = document.getElementById('monitor_snapshot_interval_sec');
+  if (btnStart) btnStart.disabled = running;
+  if (btnShutdown) btnShutdown.disabled = !running;
+  if (snapshotIntervalInput) snapshotIntervalInput.disabled = running;
+  const decoderInputs = monitorDecoders ? monitorDecoders.querySelectorAll('input[type="checkbox"]') : [];
+  const analysisInputs = monitorAnalyses ? monitorAnalyses.querySelectorAll('input[type="checkbox"]') : [];
+  decoderInputs.forEach((el) => { el.disabled = running; });
+  analysisInputs.forEach((el) => { el.disabled = running; });
+}
+
+function ensureMonitorSelections() {
+  if (!Array.isArray(monitorCatalog.decoders) || monitorCatalog.decoders.length === 0) {
+    selectedMonitorDecoder = '';
+    selectedMonitorAnalyses.clear();
+    return;
+  }
+  if (!selectedMonitorDecoder) {
+    const fromConfig = String(uiConfig.datamon_decoder || '').trim();
+    const found = monitorCatalog.decoders.find((d) => String(d.name || '') === fromConfig);
+    selectedMonitorDecoder = found ? String(found.name) : String(monitorCatalog.decoders[0].name || '');
+  }
+  const validDecoders = new Set(monitorCatalog.decoders.map((d) => String(d.name || '')));
+  if (!validDecoders.has(selectedMonitorDecoder)) {
+    selectedMonitorDecoder = String(monitorCatalog.decoders[0].name || '');
+  }
+  const validAnalyses = new Set(
+    (Array.isArray(monitorCatalog.analyses) ? monitorCatalog.analyses : [])
+      .map((a) => String(a.name || '').trim())
+      .filter((x) => x !== '')
+  );
+  selectedMonitorAnalyses = new Set(
+    Array.from(selectedMonitorAnalyses.values()).filter((name) => validAnalyses.has(name))
+  );
+}
+
+function onMonitorAnalysisToggle(name, checked) {
+  if (checked) {
+    selectedMonitorAnalyses.add(name);
+    const analysis = monitorCatalog.analyses.find((a) => String(a.name || '') === name);
+    if (analysis) {
+      const expected = String(analysis.expected_decoder || '').trim();
+      if (expected) {
+        selectedMonitorDecoder = expected;
+      }
+    }
+  } else {
+    selectedMonitorAnalyses.delete(name);
+  }
+  saveMonitorState();
+  renderMonitorModules();
+}
+
+function renderMonitorModules() {
+  if (!monitorDecoders || !monitorAnalyses) return;
+  ensureMonitorSelections();
+  const decoderTitleByName = new Map();
+  (Array.isArray(monitorCatalog.decoders) ? monitorCatalog.decoders : []).forEach((item) => {
+    const name = String(item.name || '').trim();
+    if (!name) return;
+    const title = String(item.title || name).trim() || name;
+    decoderTitleByName.set(name, title);
+  });
+
+  monitorDecoders.innerHTML = '';
+  if (!Array.isArray(monitorCatalog.decoders) || monitorCatalog.decoders.length === 0) {
+    monitorDecoders.innerHTML = '<div class="check-help">(none)</div>';
+  } else {
+    monitorCatalog.decoders.forEach((item) => {
+      const name = String(item.name || '').trim();
+      const title = String(item.title || name).trim() || name;
+      if (!name) return;
+      const row = document.createElement('label');
+      row.className = 'check-item';
+      const checked = name === selectedMonitorDecoder ? 'checked' : '';
+      row.innerHTML = `<input type="checkbox" data-monitor-decoder="${name}" ${checked} /> <span>${title}</span>`;
+      monitorDecoders.appendChild(row);
+    });
+    monitorDecoders.querySelectorAll('input[data-monitor-decoder]').forEach((el) => {
+      el.addEventListener('change', () => {
+        if (el.checked) {
+          selectedMonitorDecoder = String(el.getAttribute('data-monitor-decoder') || '');
+          saveMonitorState();
+        }
+        renderMonitorModules();
+      });
+    });
+  }
+
+  monitorAnalyses.innerHTML = '';
+  if (!Array.isArray(monitorCatalog.analyses) || monitorCatalog.analyses.length === 0) {
+    monitorAnalyses.innerHTML = '<div class="check-help">(none)</div>';
+  } else {
+    monitorCatalog.analyses.forEach((item) => {
+      const name = String(item.name || '').trim();
+      const title = String(item.title || name).trim() || name;
+      if (!name) return;
+      const expected = String(item.expected_decoder || '').trim();
+      const checked = selectedMonitorAnalyses.has(name) ? 'checked' : '';
+      const expectedTitle = expected ? (decoderTitleByName.get(expected) || expected) : '';
+      const hint = expected ? `<span class="check-help">requires ${expectedTitle}</span>` : '';
+      const row = document.createElement('label');
+      row.className = 'check-item';
+      row.innerHTML = `<input type="checkbox" data-monitor-analysis="${name}" ${checked} /> <span>${title}</span>${hint}`;
+      monitorAnalyses.appendChild(row);
+    });
+    monitorAnalyses.querySelectorAll('input[data-monitor-analysis]').forEach((el) => {
+      el.addEventListener('change', () => {
+        const name = String(el.getAttribute('data-monitor-analysis') || '');
+        onMonitorAnalysisToggle(name, el.checked);
+      });
+    });
+  }
+  setMonitorControlsByState(monitorRunning);
 }
 
 function isNearBottom(el, thresholdPx = 8) {
@@ -203,6 +371,79 @@ async function refreshDaqdLog() {
   }
 }
 
+async function refreshDatamonLog() {
+  if (!datamonLogView) return;
+  try {
+    const shouldFollow = isNearBottom(datamonLogView);
+    const limit = Number(uiConfig.datamon_log_limit || 300);
+    const data = await callApi(`/api/monitor/log?limit=${limit}`);
+    const lines = Array.isArray(data.lines) ? data.lines : [];
+    if (lines.length === 0) {
+      datamonLogView.textContent = '(no log)';
+    } else {
+      const rendered = lines.map((line) => {
+        const escaped = line
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;');
+        if (line.includes('[ERROR]')) return `<span class="log-line log-error">${escaped}</span>`;
+        if (line.includes('[WARN]')) return `<span class="log-line log-warn">${escaped}</span>`;
+        if (line.includes('[INFO]')) return `<span class="log-line log-info">${escaped}</span>`;
+        return `<span class="log-line">${escaped}</span>`;
+      });
+      datamonLogView.innerHTML = rendered.join('');
+    }
+    if (shouldFollow) {
+      datamonLogView.scrollTop = datamonLogView.scrollHeight;
+    }
+  } catch (e) {
+    datamonLogView.textContent = `log error: ${e.message}`;
+  }
+}
+
+async function refreshDatamonStatus() {
+  if (!monitorHealthLamp || !monitorHealthText) return;
+  try {
+    const data = await callApi('/api/monitor/status');
+    const running = Boolean(data.running);
+    const state = String(data.state || (running ? 'running' : 'stopped'));
+    const healthy = Number(data.healthy || 0) === 1;
+    monitorHealthLamp.className = `lamp ${healthy ? 'ok' : (state === 'error' ? 'bad' : '')}`.trim();
+    monitorHealthText.textContent = running ? 'Running' : (state === 'error' ? 'Error' : 'Stopped');
+    monitorStatusError.textContent = (state === 'error' && Number(data.last_exit || 0) !== 0)
+      ? `last exit code: ${Number(data.last_exit)}`
+      : '';
+    setMonitorControlsByState(running);
+  } catch (e) {
+    monitorHealthLamp.className = 'lamp bad';
+    monitorHealthText.textContent = 'Unavailable';
+    monitorStatusError.textContent = `monitor status error: ${e.message}`;
+    setMonitorControlsByState(false);
+  }
+}
+
+async function refreshWholeUi() {
+  try {
+    await loadMonitorModules();
+  } catch (_) {
+    // ignore
+  }
+  await Promise.all([
+    refreshStatus(),
+    refreshRunLog(),
+    refreshDaqdLog(),
+    refreshDatamonStatus(),
+    refreshDatamonLog(),
+  ]);
+  if (window.SimpleDaqSidebar && typeof window.SimpleDaqSidebar.refreshAnalysisMenu === 'function') {
+    try {
+      await window.SimpleDaqSidebar.refreshAnalysisMenu();
+    } catch (_) {
+      // ignore sidebar refresh errors
+    }
+  }
+}
+
 function parseApiError(data, status) {
   if (!data) return `HTTP ${status}`;
   const detail = data.detail !== undefined ? data.detail : data;
@@ -233,6 +474,14 @@ async function callApi(path, method = 'GET', payload = null) {
   return data;
 }
 
+async function setSelectedAnalysis(moduleName) {
+  try {
+    await callApi('/api/monitor/selected-analysis', 'POST', { module: moduleName || null });
+  } catch (_) {
+    // ignore selection sync failures
+  }
+}
+
 async function loadUiConfig() {
   uiConfig = await callApi('/api/ui-config');
   const title = String(uiConfig.title || 'DAQ Control');
@@ -242,6 +491,7 @@ async function loadUiConfig() {
   const startupTimeoutInput = document.getElementById('startup_connect_timeout_sec');
   const reconnectFailureTimeoutInput = document.getElementById('reconnect_failure_timeout_sec');
   const commentInput = document.getElementById('comment');
+  const monitorSnapshotIntervalInput = document.getElementById('monitor_snapshot_interval_sec');
   if (uiConfig.events_per_file) {
     if (eventsPerFileInput) eventsPerFileInput.value = Number(uiConfig.events_per_file);
   }
@@ -253,6 +503,9 @@ async function loadUiConfig() {
   }
   if (uiConfig.comment !== undefined && uiConfig.comment !== null) {
     if (commentInput) commentInput.value = String(uiConfig.comment);
+  }
+  if (uiConfig.datamon_snapshot_interval_sec !== undefined && monitorSnapshotIntervalInput) {
+    monitorSnapshotIntervalInput.value = String(Number(uiConfig.datamon_snapshot_interval_sec));
   }
   const saved = loadMainFormState();
   if (saved) {
@@ -270,6 +523,23 @@ async function loadUiConfig() {
     }
   }
   runLogLimit = Number(uiConfig.main_run_log_limit || 50);
+  selectedMonitorDecoder = String(uiConfig.datamon_decoder || '').trim();
+  selectedMonitorAnalyses = new Set(Array.isArray(uiConfig.datamon_analyses) ? uiConfig.datamon_analyses.map((x) => String(x)) : []);
+  const monitorSaved = loadMonitorState();
+  if (monitorSaved) {
+    if (monitorSaved.decoder !== undefined) {
+      selectedMonitorDecoder = String(monitorSaved.decoder || '').trim();
+    }
+    if (Array.isArray(monitorSaved.analyses)) {
+      selectedMonitorAnalyses = new Set(monitorSaved.analyses.map((x) => String(x)));
+    }
+    if (monitorSaved.snapshot_interval_sec !== undefined && monitorSnapshotIntervalInput) {
+      monitorSnapshotIntervalInput.value = String(Number(monitorSaved.snapshot_interval_sec));
+    } else if (monitorSaved.snapshot_interval_ms !== undefined && monitorSnapshotIntervalInput) {
+      monitorSnapshotIntervalInput.value = String(Number(monitorSaved.snapshot_interval_ms) / 1000.0);
+    }
+  }
+  monitorSnapshotIntervalSec = Math.max(0.1, Number((monitorSnapshotIntervalInput && monitorSnapshotIntervalInput.value) || 1.0));
   if (Array.isArray(uiConfig.devices)) {
     deviceEntries = uiConfig.devices.slice();
     renderDeviceTable();
@@ -348,6 +618,15 @@ async function loadFrontends() {
   renderDeviceFields();
 }
 
+async function loadMonitorModules() {
+  const data = await callApi('/api/monitor/modules');
+  monitorCatalog = {
+    decoders: Array.isArray(data.decoders) ? data.decoders : [],
+    analyses: Array.isArray(data.analyses) ? data.analyses : [],
+  };
+  renderMonitorModules();
+}
+
 function buildStartPayload() {
   const eventsInput = document.getElementById('events_per_file');
   const startupTimeoutInput = document.getElementById('startup_connect_timeout_sec');
@@ -364,6 +643,20 @@ function buildStartPayload() {
   if (startupTimeoutRaw !== '') payload.startup_connect_timeout_sec = Number(startupTimeoutRaw);
   if (reconnectFailureTimeoutRaw !== '') payload.reconnect_failure_timeout_sec = Number(reconnectFailureTimeoutRaw);
   return payload;
+}
+
+function buildMonitorStartPayload() {
+  const snapshotIntervalInput = document.getElementById('monitor_snapshot_interval_sec');
+  const snapshotIntervalRaw = snapshotIntervalInput ? String(snapshotIntervalInput.value || '').trim() : '';
+  if (snapshotIntervalRaw !== '') {
+    monitorSnapshotIntervalSec = Math.max(0.1, Number(snapshotIntervalRaw));
+    saveMonitorState();
+  }
+  return {
+    decoder: selectedMonitorDecoder || null,
+    analyses: Array.from(selectedMonitorAnalyses.values()),
+    snapshot_interval_sec: snapshotIntervalRaw === '' ? null : Number(snapshotIntervalRaw),
+  };
 }
 
 async function refreshRunLog() {
@@ -502,9 +795,7 @@ async function runCommand(path, method = 'POST', payload = null) {
       setDaqConnection(false, 'daqd shutdown requested');
     }
     cachedNextRun = null;
-    await refreshStatus();
-    await refreshRunLog();
-    await refreshDaqdLog();
+    await refreshWholeUi();
   } catch (e) {
     msgSource = 'command';
     setMessage(e.message, false);
@@ -515,10 +806,30 @@ async function startDaqdFromWeb() {
   try {
     const data = await callApi('/api/daqd/start', 'POST');
     setMessage(data.result || 'daqd started', true);
-    await refreshStatus();
-    await refreshDaqdLog();
+    await refreshWholeUi();
   } catch (e) {
     setMessage(`failed to start daqd: ${e.message}`, false);
+  }
+}
+
+async function startDatamonFromWeb() {
+  try {
+    const payload = buildMonitorStartPayload();
+    const data = await callApi('/api/monitor/start', 'POST', payload);
+    setMessage(data.result || 'datamon started', true);
+    await refreshWholeUi();
+  } catch (e) {
+    setMessage(`failed to start monitor: ${e.message}`, false);
+  }
+}
+
+async function stopDatamonFromWeb() {
+  try {
+    const data = await callApi('/api/monitor/shutdown', 'POST');
+    setMessage(data.result || 'datamon stopped', true);
+    await refreshWholeUi();
+  } catch (e) {
+    setMessage(`failed to stop monitor: ${e.message}`, false);
   }
 }
 
@@ -539,9 +850,12 @@ document.getElementById('btn_stop').addEventListener('click', async () => {
 document.getElementById('btn_shutdown').addEventListener('click', async () => {
   await runCommand('/api/shutdown');
 });
+document.getElementById('btn_start_datamon').addEventListener('click', startDatamonFromWeb);
+document.getElementById('btn_shutdown_datamon').addEventListener('click', stopDatamonFromWeb);
 document.getElementById('btn_refresh_status').addEventListener('click', refreshStatus);
 document.getElementById('btn_refresh_runlog').addEventListener('click', refreshRunLog);
 document.getElementById('btn_refresh_daqd_log').addEventListener('click', refreshDaqdLog);
+document.getElementById('btn_refresh_datamon_log').addEventListener('click', refreshDatamonLog);
 document.getElementById('btn_add_device').addEventListener('click', () => {
   try {
     const entry = collectDeviceFromForm();
@@ -554,12 +868,17 @@ document.getElementById('btn_add_device').addEventListener('click', () => {
 });
 frontendSelect.addEventListener('change', renderDeviceFields);
 bindMainFormStateSave();
+bindMonitorStateSave();
 
 Promise.all([loadUiConfig(), loadFrontends()])
   .then(async () => {
+    await setSelectedAnalysis(null);
+    await loadMonitorModules();
     await refreshStatus();
     await refreshRunLog();
     await refreshDaqdLog();
+    await refreshDatamonStatus();
+    await refreshDatamonLog();
   })
   .catch((e) => {
     setDaqConnection(false, e.message);
@@ -568,3 +887,5 @@ Promise.all([loadUiConfig(), loadFrontends()])
 
 setInterval(refreshStatus, 1000);
 setInterval(refreshDaqdLog, 2000);
+setInterval(refreshDatamonStatus, 1000);
+setInterval(refreshDatamonLog, 2000);

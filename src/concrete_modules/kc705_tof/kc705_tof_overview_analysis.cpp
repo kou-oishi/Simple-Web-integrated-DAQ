@@ -75,6 +75,8 @@ bool Kc705TofOverviewAnalysis::Finalise(std::string& error_text) {
 
 const char* Kc705TofOverviewAnalysisFactory::Name() const { return "kc705_tof_overview"; }
 
+const char* Kc705TofOverviewAnalysisFactory::Title() const { return "KC705 TOF Overview"; }
+
 const char* Kc705TofOverviewAnalysisFactory::ExpectedDecoder() const { return "kc705_tof"; }
 
 bool Kc705TofOverviewAnalysisFactory::Create(const ParsedAnalysisSpec& spec,

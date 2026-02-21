@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Analysis</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/status_panel.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <aside class="sidebar">
+      <div class="sidebar-title" id="page_title">DAQ Control Panel</div>
+      <nav class="sidebar-nav">
+        <a class="menu-btn" href="/">
+          <span class="menu-main">Main</span>
+          <span class="menu-sub">DAQ control and status</span>
+        </a>
+        <a class="menu-btn" href="/run-log">
+          <span class="menu-main">Run Log</span>
+          <span class="menu-sub">Extended run history</span>
+        </a>
+      </nav>
+    </aside>
+    <main class="content">
+      <div id="global_status_mount"></div>
+      <section class="panel">
+        <h2 id="analysis_title" style="margin:0;">Analysis</h2>
+        <div id="analysis_meta" class="check-help" style="margin-top:8px;"></div>
+        <div class="analysis-controls">
+          <label for="image_size_range">Image size</label>
+          <input id="image_size_range" type="range" min="220" max="1400" step="20" value="520" />
+          <span id="image_size_value" class="check-help">520 px</span>
+        </div>
+        <div id="analysis_error" class="status-error"></div>
+        <div id="analysis_images" class="analysis-grid"></div>
+      </section>
+    </main>
+  </div>
+  <div id="image_overlay" class="image-overlay hidden">
+    <img id="overlay_image" class="image-overlay-img" alt="analysis view" />
+  </div>
+  <script src="/status_panel.js" defer></script>
+  <script src="/sidebar.js" defer></script>
+  <script src="/analysis.js" defer></script>
+</body>
+</html>
