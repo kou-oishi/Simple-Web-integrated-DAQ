@@ -9,7 +9,7 @@
 
 #include "core/defaults.hpp"
 #include "monitor/decoder.hpp"
-#include "monitor/decoder_registry.hpp"
+#include "concrete_modules/module_registry.hpp"
 #include "monitor/frame_source.hpp"
 #include "monitor/pipeline.hpp"
 #include "monitor/sink.hpp"

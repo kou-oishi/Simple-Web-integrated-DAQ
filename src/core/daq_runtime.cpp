@@ -14,7 +14,7 @@
 
 #include "core/blocking_queue.hpp"
 #include "core/defaults.hpp"
-#include "core/device_frontend_registry.hpp"
+#include "concrete_modules/module_registry.hpp"
 #include "core/validation_result.hpp"
 
 namespace {

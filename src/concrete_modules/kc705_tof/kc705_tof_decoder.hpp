@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "monitor/decoder.hpp"
-#include "monitor/decoder_registry.hpp"
+#include "concrete_modules/module_registry.hpp"
 
 struct Kc705TofEvent {
   uint64_t raw_word = 0;

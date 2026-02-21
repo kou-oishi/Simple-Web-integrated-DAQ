@@ -14,11 +14,12 @@ add_library(daq_core_drivers
   src/drivers/tcp_device_driver.cpp
   src/concrete_modules/kc705_tof/kc705_tof_validator.cpp
   src/concrete_modules/kc705_tof/kc705_tof_frontend.cpp
-  src/core/device_frontend_registry.cpp
+  src/concrete_modules/module_registry.cpp
   src/core/daq_cli.cpp
   src/core/daq_runtime.cpp
 )
 target_include_directories(daq_core_drivers PUBLIC src)
+target_compile_definitions(daq_core_drivers PRIVATE SIMPLEDAQ_ENABLE_FRONTEND_REGISTRY=1 SIMPLEDAQ_ENABLE_DECODER_REGISTRY=0)
 
 add_library(daq_control_api
   src/control_api/zmq_control_client.cpp
@@ -46,7 +47,7 @@ target_include_directories(daqmon PRIVATE src)
 
 add_library(daq_monitor
   src/monitor/frame_source.cpp
-  src/monitor/decoder_registry.cpp
+  src/concrete_modules/module_registry.cpp
   src/monitor/sink_text.cpp
   src/monitor/pipeline.cpp
   src/monitor/zmq_frame_source.cpp
@@ -55,6 +56,7 @@ add_library(daq_monitor
 target_include_directories(daq_monitor PUBLIC src ${LIBZMQ_INCLUDE_DIRS})
 target_compile_options(daq_monitor PRIVATE ${LIBZMQ_CFLAGS_OTHER})
 target_link_libraries(daq_monitor PRIVATE ${LIBZMQ_LIBRARIES})
+target_compile_definitions(daq_monitor PRIVATE SIMPLEDAQ_ENABLE_FRONTEND_REGISTRY=0 SIMPLEDAQ_ENABLE_DECODER_REGISTRY=1)
 
 if(ROOT_FOUND)
   target_sources(daq_monitor PRIVATE src/monitor/sink_root.cpp)

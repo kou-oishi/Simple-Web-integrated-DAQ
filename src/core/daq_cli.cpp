@@ -7,7 +7,7 @@
 #include <sstream>
 #include <string>
 
-#include "core/device_frontend_registry.hpp"
+#include "concrete_modules/module_registry.hpp"
 
 namespace {
 

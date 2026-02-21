@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "core/device_frontend.hpp"
 #include "monitor/decoder.hpp"
 
 class IMonitorDecoderFactory {
@@ -17,6 +18,17 @@ class IMonitorDecoderFactory {
                       std::size_t& out_frame_size,
                       std::string& error_text) const = 0;
 };
+
+struct ConcreteModuleRegistration {
+  const char* id = nullptr;
+  const IDeviceFrontend* frontend = nullptr;
+  const IMonitorDecoderFactory* decoder_factory = nullptr;
+};
+
+const std::vector<ConcreteModuleRegistration>& GetConcreteModuleRegistry();
+
+const IDeviceFrontend* FindDeviceFrontend(const std::string& frontend_id);
+std::vector<std::string> ListDeviceFrontendIds();
 
 const IMonitorDecoderFactory* FindMonitorDecoderFactory(const std::string& name);
 std::vector<std::string> ListMonitorDecoderFactories();
