@@ -455,6 +455,11 @@ class DaqService {
 
   std::string status_fields_locked() const {
     std::ostringstream oss;
+    const uint32_t events_per_file = active_cfg_.events_per_file;
+    uint32_t events_in_file = 0;
+    if (events_per_file > 0 && published_events_ > 0) {
+      events_in_file = static_cast<uint32_t>(((published_events_ - 1) % events_per_file) + 1);
+    }
     oss << "state=" << state_
         << " running=" << (running_ ? 1 : 0)
         << " healthy=" << (state_ == "error" ? 0 : 1)
@@ -462,7 +467,9 @@ class DaqService {
         << " events_total=" << published_events_
         << " Run=" << current_run_number_locked()
         << " subrun=" << current_subrun_number_locked()
-        << " events_in_run=" << events_in_current_run_;
+        << " events_in_run=" << events_in_current_run_
+        << " events_per_file=" << events_per_file
+        << " events_in_file=" << events_in_file;
     if (running_) {
       const auto elapsed = std::chrono::steady_clock::now() - started_at_;
       const auto sec = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();

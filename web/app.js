@@ -26,6 +26,7 @@ let daqConnected = false;
 let statusPollInFlight = false;
 let msgSource = '';
 let daqState = '-';
+let runLogLimit = 50;
 
 function setActionButtonsByState(state, running) {
   const btnStart = document.getElementById('btn_start');
@@ -83,7 +84,7 @@ function isNearBottom(el, thresholdPx = 8) {
 }
 
 function setMessage(text, ok = true) {
-  msg.className = 'msg ' + (ok ? 'ok' : 'err');
+  msg.className = 'msg status-msg ' + (ok ? 'ok' : 'err');
   msg.textContent = text || '';
   if (ok) {
     msgSource = '';
@@ -207,6 +208,7 @@ async function loadUiConfig() {
   if (uiConfig.comment !== undefined && uiConfig.comment !== null) {
     if (commentInput) commentInput.value = String(uiConfig.comment);
   }
+  runLogLimit = Number(uiConfig.run_log_limit || 50);
   if (Array.isArray(uiConfig.devices)) {
     deviceEntries = uiConfig.devices.slice();
     renderDeviceTable();
@@ -305,7 +307,7 @@ function buildStartPayload() {
 
 async function refreshRunLog() {
   try {
-    const limit = Number(uiConfig.run_log_limit || 50);
+    const limit = Number(runLogLimit || uiConfig.run_log_limit || 50);
     const data = await callApi(`/api/run-log?limit=${limit}&offset=0`);
     runLogBody.innerHTML = '';
     (data.rows || []).forEach((r) => {
@@ -406,10 +408,14 @@ async function renderStatus(data) {
     setMessage('', true);
   }
 
-  const rawEventsPerFile = Number(document.getElementById('events_per_file').value || 0);
-  const eventsPerFile = rawEventsPerFile > 0 ? rawEventsPerFile : 0;
+  const fromStatusPerFile = Number(data.events_per_file || 0);
+  const fromInputPerFile = Number(document.getElementById('events_per_file').value || 0);
+  const eventsPerFile = fromStatusPerFile > 0 ? fromStatusPerFile : (fromInputPerFile > 0 ? fromInputPerFile : 0);
+  const fromStatusInFile = Number(data.events_in_file || 0);
   let inFile = 0;
-  if (eventsPerFile > 0 && running) {
+  if (running && fromStatusInFile > 0) {
+    inFile = fromStatusInFile;
+  } else if (eventsPerFile > 0 && running) {
     inFile = total % eventsPerFile;
     if (inFile === 0 && total > 0) {
       inFile = eventsPerFile;

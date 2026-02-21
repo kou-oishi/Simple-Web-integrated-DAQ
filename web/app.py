@@ -250,14 +250,34 @@ def index() -> FileResponse:
     return FileResponse(APP_ROOT / "index.html")
 
 
+@app.get("/run-log")
+def runlog_page() -> FileResponse:
+    return FileResponse(APP_ROOT / "runlog.html")
+
+
 @app.get("/styles.css")
 def styles_css() -> FileResponse:
     return FileResponse(APP_ROOT / "styles.css", media_type="text/css")
 
 
+@app.get("/status_panel.css")
+def status_panel_css() -> FileResponse:
+    return FileResponse(APP_ROOT / "status_panel.css", media_type="text/css")
+
+
 @app.get("/app.js")
 def app_js() -> FileResponse:
     return FileResponse(APP_ROOT / "app.js", media_type="application/javascript")
+
+
+@app.get("/runlog.js")
+def runlog_js() -> FileResponse:
+    return FileResponse(APP_ROOT / "runlog.js", media_type="application/javascript")
+
+
+@app.get("/status_panel.js")
+def status_panel_js() -> FileResponse:
+    return FileResponse(APP_ROOT / "status_panel.js", media_type="application/javascript")
 
 
 @app.get("/api/health")

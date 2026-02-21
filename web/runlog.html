@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Run Log</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/status_panel.css" />
+</head>
+<body>
+  <div class="app-layout">
+    <aside class="sidebar">
+      <div class="sidebar-title" id="page_title">DAQ Control Panel</div>
+      <nav class="sidebar-nav">
+        <a class="menu-btn" href="/">
+          <span class="menu-main">Main</span>
+          <span class="menu-sub">DAQ control and status</span>
+        </a>
+        <a class="menu-btn active" href="/run-log">
+          <span class="menu-main">Run Log</span>
+          <span class="menu-sub">Extended run history</span>
+        </a>
+      </nav>
+    </aside>
+    <main class="content">
+      <div id="global_status_mount"></div>
+
+      <section class="panel">
+        <div class="toolbar">
+          <h2 style="margin:0;">Run Log</h2>
+          <div class="runlog-toolbar">
+            <label for="runlog_limit">Rows</label>
+            <input id="runlog_limit" type="number" min="1" max="1000" value="200" />
+            <label for="runlog_offset">Offset</label>
+            <input id="runlog_offset" type="number" min="0" value="0" />
+            <label for="runlog_status">Status</label>
+            <select id="runlog_status">
+              <option value="">All</option>
+              <option value="completed">completed</option>
+              <option value="stopped">stopped</option>
+              <option value="paused">paused</option>
+              <option value="error">error</option>
+            </select>
+            <label for="runlog_run">Run</label>
+            <input id="runlog_run" type="number" min="0" placeholder="any" />
+            <label for="runlog_subrun">Subrun</label>
+            <input id="runlog_subrun" type="number" min="0" placeholder="any" />
+            <label class="checkbox-inline">
+              <input id="runlog_auto" type="checkbox" />
+              Auto
+            </label>
+            <button id="btn_refresh_runlog">Refresh</button>
+          </div>
+        </div>
+        <div class="runlog-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>run</th><th>subrun</th><th>nevents</th><th>start_time</th><th>end_time</th><th>status</th><th>comment</th>
+              </tr>
+            </thead>
+            <tbody id="runlog_tbody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/status_panel.js" defer></script>
+  <script src="/runlog.js" defer></script>
+</body>
+</html>
