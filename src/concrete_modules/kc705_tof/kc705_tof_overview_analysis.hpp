@@ -16,11 +16,11 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
  public:
   explicit Kc705TofOverviewAnalysis(std::size_t trend_points);
 
-  bool initialise(std::string& error_text) override;
-  bool finalise(std::string& error_text) override;
+  bool Initialise(std::string& error_text) override;
+  bool Finalise(std::string& error_text) override;
 
  private:
-  bool event(const Kc705TofEvent& event, std::string& error_text) override;
+  bool Event(const Kc705TofEvent& Event, std::string& error_text) override;
 
   std::size_t trend_points_ = 1000;
 
@@ -34,9 +34,9 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
 
 class Kc705TofOverviewAnalysisFactory final : public IMonitorRealtimeAnalysisFactory {
  public:
-  const char* name() const override;
-  const char* expected_decoder() const override;
-  bool create(const ParsedAnalysisSpec& spec,
+  const char* Name() const override;
+  const char* ExpectedDecoder() const override;
+  bool Create(const ParsedAnalysisSpec& spec,
               std::unique_ptr<IRealtimeAnalysis>& out_analysis,
               std::string& error_text) const override;
 };

@@ -42,12 +42,12 @@ std::string supported_frontends_text() {
 void PrintDaqUsage(const char* prog) {
   std::cerr << "Usage: " << prog
             << " --output-dir <dir> --device <frontend>=<spec> [--device <...>]"
-            << " [--run-start <>=0>] [--events-per-file <>=1>]"
+            << " [--Run-start <>=0>] [--events-per-file <>=1>]"
             << " [--reconnect-ms <>=1>] [--read-timeout-ms <>=1>] [--duration-sec <>=1>]\n";
   std::cerr << "Options:\n";
-  std::cerr << "  -o, --output-dir <dir>         Output directory for run files (required)\n";
+  std::cerr << "  -o, --output-dir <dir>         Output directory for Run files (required)\n";
   std::cerr << "  -d, --device <frontend>=<spec> Input device spec; repeatable\n";
-  std::cerr << "  -r, --run-start <n>            Starting run number (>= 0)\n";
+  std::cerr << "  -r, --Run-start <n>            Starting Run number (>= 0)\n";
   std::cerr << "  -e, --events-per-file <n>      Events per file (>= 1)\n";
   std::cerr << "  -c, --reconnect-ms <ms>        Reconnect interval in milliseconds (>= 1)\n";
   std::cerr << "  -t, --read-timeout-ms <ms>     Read timeout in milliseconds (>= 1)\n";
@@ -61,7 +61,7 @@ bool ParseDaqArgs(int argc, char** argv, DaqConfig& cfg) {
   static constexpr option kLongOpts[] = {
       {"output-dir", required_argument, nullptr, 'o'},
       {"device", required_argument, nullptr, 'd'},
-      {"run-start", required_argument, nullptr, 'r'},
+      {"Run-start", required_argument, nullptr, 'r'},
       {"events-per-file", required_argument, nullptr, 'e'},
       {"reconnect-ms", required_argument, nullptr, 'c'},
       {"read-timeout-ms", required_argument, nullptr, 't'},
@@ -99,7 +99,7 @@ bool ParseDaqArgs(int argc, char** argv, DaqConfig& cfg) {
 
         DeviceSpec spec;
         std::string parse_error;
-        if (!frontend->parse_device_spec(frontend_spec, spec, parse_error)) {
+        if (!frontend->ParseDeviceSpec(frontend_spec, spec, parse_error)) {
           std::cerr << "Invalid --device for frontend '" << frontend_id << "': " << parse_error << "\n";
           return false;
         }
@@ -109,7 +109,7 @@ bool ParseDaqArgs(int argc, char** argv, DaqConfig& cfg) {
       case 'r': {
         uint32_t tmp = 0;
         if (!parse_u32(optarg, tmp)) {
-          std::cerr << "Invalid --run-start: " << optarg << " (expected >=0)\n";
+          std::cerr << "Invalid --Run-start: " << optarg << " (expected >=0)\n";
           return false;
         }
         cfg.run_start = tmp;

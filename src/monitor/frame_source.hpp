@@ -23,7 +23,7 @@ struct FrameEnvelope {
 class IFrameSource {
  public:
   virtual ~IFrameSource() = default;
-  virtual SourceStatus next_frame(FrameEnvelope& out_frame,
+  virtual SourceStatus NextFrame(FrameEnvelope& out_frame,
                                   std::string& error_text,
                                   const volatile std::sig_atomic_t* stop_requested = nullptr) = 0;
 };
@@ -32,12 +32,12 @@ class FileFrameSource : public IFrameSource {
  public:
   FileFrameSource(std::string path, std::size_t frame_size);
 
-  SourceStatus next_frame(FrameEnvelope& out_frame,
+  SourceStatus NextFrame(FrameEnvelope& out_frame,
                           std::string& error_text,
                           const volatile std::sig_atomic_t* stop_requested = nullptr) override;
 
  private:
-  uint32_t detect_run_number_from_path() const;
+  uint32_t DetectRunNumberFromPath() const;
 
   std::string path_;
   std::size_t frame_size_;
@@ -56,13 +56,13 @@ class LiveRunFileSource : public IFrameSource {
                     uint32_t poll_ms,
                     uint32_t idle_timeout_sec);
 
-  SourceStatus next_frame(FrameEnvelope& out_frame,
+  SourceStatus NextFrame(FrameEnvelope& out_frame,
                           std::string& error_text,
                           const volatile std::sig_atomic_t* stop_requested = nullptr) override;
 
  private:
-  bool open_current_file(std::string& error_text);
-  bool try_advance_next_run(std::string& error_text);
+  bool OpenCurrentFile(std::string& error_text);
+  bool TryAdvanceNextRun(std::string& error_text);
   std::string run_path(uint32_t run_number) const;
 
   std::string output_dir_;

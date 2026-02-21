@@ -16,12 +16,12 @@ class RootDisplayRegistry final : public IRealtimeDisplayRegistry {
  public:
   explicit RootDisplayRegistry(RealtimeAnalysisSink& owner) : owner_(owner) {}
 
-  bool register_canvas(TCanvas* canvas, std::string& error_text) override {
-    return owner_.register_canvas(canvas, error_text);
+  bool RegisterCanvas(TCanvas* canvas, std::string& error_text) override {
+    return owner_.RegisterCanvas(canvas, error_text);
   }
 
-  bool register_drawable(TVirtualPad* pad, TObject* object, const char* draw_option, std::string& error_text) override {
-    return owner_.register_drawable(pad, object, draw_option, error_text);
+  bool RegisterDrawable(TVirtualPad* pad, TObject* object, const char* draw_option, std::string& error_text) override {
+    return owner_.RegisterDrawable(pad, object, draw_option, error_text);
   }
 
  private:
@@ -48,7 +48,7 @@ RealtimeAnalysisSink::~RealtimeAnalysisSink() {
 #endif
 }
 
-bool RealtimeAnalysisSink::register_canvas(TCanvas* canvas, std::string& error_text) {
+bool RealtimeAnalysisSink::RegisterCanvas(TCanvas* canvas, std::string& error_text) {
   error_text.clear();
 #if defined(SIMPLEDAQ_HAS_ROOT) && SIMPLEDAQ_HAS_ROOT
   if (canvas == nullptr) {
@@ -64,7 +64,7 @@ bool RealtimeAnalysisSink::register_canvas(TCanvas* canvas, std::string& error_t
 #endif
 }
 
-bool RealtimeAnalysisSink::register_drawable(TVirtualPad* pad,
+bool RealtimeAnalysisSink::RegisterDrawable(TVirtualPad* pad,
                                              TObject* object,
                                              const char* draw_option,
                                              std::string& error_text) {
@@ -85,7 +85,7 @@ bool RealtimeAnalysisSink::register_drawable(TVirtualPad* pad,
 #endif
 }
 
-bool RealtimeAnalysisSink::ensure_initialized(std::string& error_text) {
+bool RealtimeAnalysisSink::EnsureInitialised(std::string& error_text) {
   error_text.clear();
   if (initialised_) {
     return true;
@@ -101,13 +101,13 @@ bool RealtimeAnalysisSink::ensure_initialized(std::string& error_text) {
 
   RootDisplayRegistry registry(*this);
   for (auto& analysis : analyses_) {
-    analysis->set_display_registry(&registry);
-    if (!analysis->initialise(error_text)) {
+    analysis->SetDisplayRegistry(&registry);
+    if (!analysis->Initialise(error_text)) {
       return false;
     }
   }
 
-  redraw_all();
+  RedrawAll();
   gSystem->ProcessEvents();
   initialised_ = true;
   return true;
@@ -117,7 +117,7 @@ bool RealtimeAnalysisSink::ensure_initialized(std::string& error_text) {
 #endif
 }
 
-void RealtimeAnalysisSink::redraw_all() {
+void RealtimeAnalysisSink::RedrawAll() {
 #if defined(SIMPLEDAQ_HAS_ROOT) && SIMPLEDAQ_HAS_ROOT
   for (const auto& binding : drawables_) {
     const auto* graph = dynamic_cast<const TGraph*>(binding.object);
@@ -132,58 +132,58 @@ void RealtimeAnalysisSink::redraw_all() {
 #endif
 }
 
-void RealtimeAnalysisSink::pump_gui() {
+void RealtimeAnalysisSink::PumpGui() {
 #if defined(SIMPLEDAQ_HAS_ROOT) && SIMPLEDAQ_HAS_ROOT
   const auto now = std::chrono::steady_clock::now();
   const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_gui_update_).count();
   if (elapsed_ms >= static_cast<long long>(gui_update_interval_ms_)) {
-    redraw_all();
+    RedrawAll();
     last_gui_update_ = now;
   }
   gSystem->ProcessEvents();
 #endif
 }
 
-bool RealtimeAnalysisSink::consume(const DecodedMessage& message, std::string& error_text) {
-  if (!ensure_initialized(error_text)) {
+bool RealtimeAnalysisSink::Consume(const DecodedMessage& message, std::string& error_text) {
+  if (!EnsureInitialised(error_text)) {
     return false;
   }
 
   error_text.clear();
   for (auto& analysis : analyses_) {
-    if (!analysis->event(message, error_text)) {
+    if (!analysis->Event(message, error_text)) {
       return false;
     }
   }
-  pump_gui();
+  PumpGui();
   return true;
 }
 
-bool RealtimeAnalysisSink::finalize(std::string& error_text) {
+bool RealtimeAnalysisSink::Finalise(std::string& error_text) {
   error_text.clear();
   if (finalised_) {
     return true;
   }
   finalised_ = true;
 
-  if (!ensure_initialized(error_text)) {
+  if (!EnsureInitialised(error_text)) {
     return false;
   }
 
   for (auto& analysis : analyses_) {
     std::string local_error;
-    if (!analysis->finalise(local_error)) {
+    if (!analysis->Finalise(local_error)) {
       if (error_text.empty()) {
         error_text = local_error;
       } else {
-        error_text += " | analysis finalize failed: " + local_error;
+        error_text += " | analysis Finalise failed: " + local_error;
       }
       return false;
     }
   }
 
 #if defined(SIMPLEDAQ_HAS_ROOT) && SIMPLEDAQ_HAS_ROOT
-  redraw_all();
+  RedrawAll();
   gSystem->ProcessEvents();
 #endif
   return true;

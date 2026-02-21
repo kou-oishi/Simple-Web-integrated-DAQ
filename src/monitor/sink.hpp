@@ -11,19 +11,19 @@
 class IEventSink {
  public:
   virtual ~IEventSink() = default;
-  virtual bool consume(const DecodedMessage& message, std::string& error_text) = 0;
-  virtual bool finalize(std::string& error_text) = 0;
+  virtual bool Consume(const DecodedMessage& message, std::string& error_text) = 0;
+  virtual bool Finalise(std::string& error_text) = 0;
 };
 
 class TextSink : public IEventSink {
  public:
   TextSink(const IDecoder* decoder, std::string output_path, uint64_t print_every, bool print_summary);
 
-  bool consume(const DecodedMessage& message, std::string& error_text) override;
-  bool finalize(std::string& error_text) override;
+  bool Consume(const DecodedMessage& message, std::string& error_text) override;
+  bool Finalise(std::string& error_text) override;
 
  private:
-  bool ensure_open(std::string& error_text);
+  bool EnsureOpen(std::string& error_text);
 
   const IDecoder* decoder_;
   std::string output_path_;

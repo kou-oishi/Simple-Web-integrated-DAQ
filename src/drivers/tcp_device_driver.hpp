@@ -20,13 +20,13 @@ class TcpDeviceDriver : public IDeviceDriver {
                   std::size_t network_word_bytes = 8);
   ~TcpDeviceDriver() override;
 
-  bool connect_device() override;
-  void disconnect_device() override;
-  ReadStatus read_bytes(std::vector<uint8_t>& out_bytes, size_t max_bytes, int timeout_ms) override;
+  bool ConnectDevice() override;
+  void DisconnectDevice() override;
+  ReadStatus ReadBytes(std::vector<uint8_t>& out_bytes, size_t max_bytes, int timeout_ms) override;
 
  private:
-  static bool is_little_endian_host();
-  static void append_network_word_as_host(const uint8_t* network_word, std::size_t word_bytes, std::vector<uint8_t>& out_bytes);
+  static bool IsLittleEndianHost();
+  static void AppendNetworkWordAsHost(const uint8_t* network_word, std::size_t word_bytes, std::vector<uint8_t>& out_bytes);
 
   std::string host_;
   uint16_t port_;

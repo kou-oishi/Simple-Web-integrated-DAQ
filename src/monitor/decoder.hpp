@@ -41,18 +41,18 @@ class IDecoder {
   virtual ~IDecoder() = default;
 
   // 1) Convert binary frame to readable decoded representation.
-  virtual bool decode_frame(const std::vector<uint8_t>& frame,
+  virtual bool DecodeFrame(const std::vector<uint8_t>& frame,
                             DecodedMessage& out_message,
                             std::string& error_text) = 0;
 
   // 2) Define TTree branch layout and value types expected for this decoder.
-  virtual std::vector<TreeBranchDef> tree_branches() const = 0;
+  virtual std::vector<TreeBranchDef> TreeBranches() const = 0;
 
-  // 3) Convert decoded message to branch values in tree_branches() order.
-  virtual bool decoded_to_tree_values(const DecodedMessage& message,
+  // 3) Convert decoded message to branch values in TreeBranches() order.
+  virtual bool DecodedToTreeValues(const DecodedMessage& message,
                                       std::vector<TreeValue>& out_values,
                                       std::string& error_text) const = 0;
 
   // Helper for generic console output.
-  virtual bool format_decoded(const DecodedMessage& message, std::string& out_text, std::string& error_text) const = 0;
+  virtual bool FormatDecoded(const DecodedMessage& message, std::string& out_text, std::string& error_text) const = 0;
 };

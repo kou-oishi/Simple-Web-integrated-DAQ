@@ -9,7 +9,7 @@ TextSink::TextSink(const IDecoder* decoder, std::string output_path, uint64_t pr
       print_every_(print_every == 0 ? 1 : print_every),
       print_summary_(print_summary) {}
 
-bool TextSink::ensure_open(std::string& error_text) {
+bool TextSink::EnsureOpen(std::string& error_text) {
   error_text.clear();
   if (decoder_ == nullptr) {
     error_text = "text sink has null decoder";
@@ -30,8 +30,8 @@ bool TextSink::ensure_open(std::string& error_text) {
   return true;
 }
 
-bool TextSink::consume(const DecodedMessage& message, std::string& error_text) {
-  if (!ensure_open(error_text)) {
+bool TextSink::Consume(const DecodedMessage& message, std::string& error_text) {
+  if (!EnsureOpen(error_text)) {
     return false;
   }
 
@@ -41,7 +41,7 @@ bool TextSink::consume(const DecodedMessage& message, std::string& error_text) {
   }
 
   std::string text;
-  if (!decoder_->format_decoded(message, text, error_text)) {
+  if (!decoder_->FormatDecoded(message, text, error_text)) {
     return false;
   }
 
@@ -68,7 +68,7 @@ bool TextSink::consume(const DecodedMessage& message, std::string& error_text) {
   return true;
 }
 
-bool TextSink::finalize(std::string& error_text) {
+bool TextSink::Finalise(std::string& error_text) {
   error_text.clear();
   if (use_stdout_ && print_summary_) {
     std::cout << "processed_events=" << seen_ << "\n";

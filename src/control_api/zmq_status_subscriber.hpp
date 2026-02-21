@@ -7,8 +7,8 @@ class ZmqStatusSubscriber {
   explicit ZmqStatusSubscriber(std::string endpoint);
   ~ZmqStatusSubscriber();
 
-  bool connect(std::string& error_text);
-  bool receive_next(std::string& payload, std::string& error_text);
+  bool Connect(std::string& error_text);
+  bool ReceiveNext(std::string& payload, std::string& error_text);
 
  private:
   std::string endpoint_;

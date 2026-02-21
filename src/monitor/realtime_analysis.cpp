@@ -22,16 +22,16 @@ std::string trim_copy(const std::string& text) {
 
 }  // namespace
 
-bool IRealtimeAnalysis::register_canvas(TCanvas* canvas, std::string& error_text) const {
+bool IRealtimeAnalysis::RegisterCanvas(TCanvas* canvas, std::string& error_text) const {
   error_text.clear();
   if (display_registry_ == nullptr) {
     error_text = "realtime analysis display registry is not set";
     return false;
   }
-  return display_registry_->register_canvas(canvas, error_text);
+  return display_registry_->RegisterCanvas(canvas, error_text);
 }
 
-bool IRealtimeAnalysis::register_drawable(TVirtualPad* pad,
+bool IRealtimeAnalysis::RegisterDrawable(TVirtualPad* pad,
                                           TObject* object,
                                           const char* draw_option,
                                           std::string& error_text) const {
@@ -40,7 +40,7 @@ bool IRealtimeAnalysis::register_drawable(TVirtualPad* pad,
     error_text = "realtime analysis display registry is not set";
     return false;
   }
-  return display_registry_->register_drawable(pad, object, draw_option, error_text);
+  return display_registry_->RegisterDrawable(pad, object, draw_option, error_text);
 }
 
 bool ParseUnsignedU64(const std::string& text, uint64_t& out) {
@@ -104,11 +104,11 @@ bool ParseKeyValueSpec(const std::string& spec,
   return true;
 }
 
-bool ParsedAnalysisSpec::parse(const std::string& spec, std::string& error_text) {
+bool ParsedAnalysisSpec::Parse(const std::string& spec, std::string& error_text) {
   return ParseKeyValueSpec(spec, kv_pairs_, error_text);
 }
 
-bool ParsedAnalysisSpec::read_u64(const char* key,
+bool ParsedAnalysisSpec::ReadU64(const char* key,
                                   uint64_t default_value,
                                   uint64_t& out,
                                   std::string& error_text) const {
@@ -125,7 +125,7 @@ bool ParsedAnalysisSpec::read_u64(const char* key,
   return true;
 }
 
-bool ParsedAnalysisSpec::read_size(const char* key,
+bool ParsedAnalysisSpec::ReadSize(const char* key,
                                    std::size_t default_value,
                                    std::size_t& out,
                                    std::string& error_text) const {
@@ -142,7 +142,7 @@ bool ParsedAnalysisSpec::read_size(const char* key,
   return true;
 }
 
-bool ParsedAnalysisSpec::reject_unknown(std::initializer_list<const char*> allowed_keys, std::string& error_text) const {
+bool ParsedAnalysisSpec::RejectUnknown(std::initializer_list<const char*> allowed_keys, std::string& error_text) const {
   error_text.clear();
   std::unordered_set<std::string> allowed;
   for (const char* key : allowed_keys) {

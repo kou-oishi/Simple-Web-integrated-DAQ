@@ -22,11 +22,11 @@ namespace {
 const char* to_string(ValidationResult::Status s) {
   switch (s) {
     case ValidationResult::Status::kOk:
-      return "ok";
+      return "Ok";
     case ValidationResult::Status::kRecoverableError:
-      return "recoverable";
+      return "Recoverable";
     case ValidationResult::Status::kFatalError:
-      return "fatal";
+      return "Fatal";
   }
   return "unknown";
 }
@@ -45,22 +45,22 @@ void run_worker(const DeviceSpec& spec,
   if (frontend == nullptr) {
     std::cerr << "[ERROR] unknown frontend in runtime: " << spec.frontend << "\n";
     running.store(false);
-    queue.close();
+    queue.Close();
     return;
   }
 
-  std::unique_ptr<IDeviceDriver> driver = frontend->create_driver(spec);
-  std::unique_ptr<IDataValidator> validator = frontend->create_validator(spec);
+  std::unique_ptr<IDeviceDriver> driver = frontend->CreateDriver(spec);
+  std::unique_ptr<IDataValidator> validator = frontend->CreateValidator(spec);
   if (!driver || !validator) {
-    std::cerr << "[ERROR] failed to create driver/validator for frontend: " << spec.frontend << "\n";
+    std::cerr << "[ERROR] failed to Create driver/validator for frontend: " << spec.frontend << "\n";
     running.store(false);
-    queue.close();
+    queue.Close();
     return;
   }
 
   while (running.load() && stop_requested == 0) {
-    if (!driver->connect_device()) {
-      std::cerr << "[WARN] connect failed: " << device_label(spec) << "\n";
+    if (!driver->ConnectDevice()) {
+      std::cerr << "[WARN] Connect failed: " << device_label(spec) << "\n";
       std::this_thread::sleep_for(std::chrono::milliseconds(cfg.reconnect_ms));
       continue;
     }
@@ -69,21 +69,21 @@ void run_worker(const DeviceSpec& spec,
 
     while (running.load() && stop_requested == 0) {
       std::vector<uint8_t> chunk;
-      const ReadStatus st = driver->read_bytes(
+      const ReadStatus st = driver->ReadBytes(
           chunk, daq_defaults::kReadChunkSizeBytes, static_cast<int>(cfg.read_timeout_ms));
       if (st == ReadStatus::kTimeout) {
         continue;
       }
       if (st != ReadStatus::kOk) {
         std::cerr << "[WARN] disconnected/read-error: " << device_label(spec) << "\n";
-        driver->disconnect_device();
-        validator->reset();
+        driver->DisconnectDevice();
+        validator->Reset();
         break;
       }
 
       std::vector<std::vector<uint8_t>> frames;
-      const ValidationResult vr = validator->feed(chunk.data(), chunk.size(), frames);
-      if (!vr.ok()) {
+      const ValidationResult vr = validator->Feed(chunk.data(), chunk.size(), frames);
+      if (!vr.IsOk()) {
         std::cerr << "[ERROR] validator error on " << device_label(spec)
                   << " status=" << to_string(vr.status())
                   << " code=" << static_cast<uint32_t>(vr.code())
@@ -91,14 +91,14 @@ void run_worker(const DeviceSpec& spec,
                   << " detail_tag=" << vr.detail_tag()
                   << " message=" << vr.message() << "\n";
 
-        if (vr.fatal()) {
+        if (vr.IsFatal()) {
           running.store(false);
-          queue.close();
+          queue.Close();
           return;
         }
 
-        driver->disconnect_device();
-        validator->reset();
+        driver->DisconnectDevice();
+        validator->Reset();
         std::this_thread::sleep_for(std::chrono::milliseconds(cfg.reconnect_ms));
         break;
       }
@@ -107,27 +107,27 @@ void run_worker(const DeviceSpec& spec,
         FrameRecord rec;
         rec.source = "board" + std::to_string(static_cast<unsigned>(spec.board_id));
         rec.payload = std::move(frame);
-        if (!queue.push(std::move(rec))) {
+        if (!queue.Push(std::move(rec))) {
           return;
         }
       }
     }
   }
 
-  driver->disconnect_device();
+  driver->DisconnectDevice();
 }
 
 bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue, const FramePublishCallback& on_frame_ready) {
   std::error_code ec;
   std::filesystem::create_directories(cfg.output_dir, ec);
   if (ec) {
-    std::cerr << "Failed to create output_dir: " << cfg.output_dir << " (" << ec.message() << ")\n";
+    std::cerr << "Failed to Create output_dir: " << cfg.output_dir << " (" << ec.message() << ")\n";
     return false;
   }
 
   auto make_run_path = [&](uint32_t run_number) -> std::filesystem::path {
     std::ostringstream oss;
-    oss << "run" << std::setw(daq_defaults::kRunNumberWidth) << std::setfill('0') << run_number << ".dat";
+    oss << "Run" << std::setw(daq_defaults::kRunNumberWidth) << std::setfill('0') << run_number << ".dat";
     return std::filesystem::path(cfg.output_dir) / oss.str();
   };
 
@@ -135,20 +135,20 @@ bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue, const F
   uint32_t events_in_current_file = 0;
   std::ofstream ofs;
 
-  auto open_run_file = [&](uint32_t run) -> bool {
-    const std::filesystem::path path = make_run_path(run);
+  auto open_run_file = [&](uint32_t Run) -> bool {
+    const std::filesystem::path path = make_run_path(Run);
     ofs = std::ofstream(path, std::ios::binary | std::ios::out | std::ios::trunc);
     if (!ofs.is_open()) {
       std::cerr << "Failed to open output file: " << path.string() << "\n";
       return false;
     }
     events_in_current_file = 0;
-    std::cerr << "[INFO] writing run file: " << path.string() << "\n";
+    std::cerr << "[INFO] writing Run file: " << path.string() << "\n";
     return true;
   };
 
   FrameRecord rec;
-  while (queue.pop(rec)) {
+  while (queue.Pop(rec)) {
     if (!ofs.is_open()) {
       if (!open_run_file(run_number)) {
         return false;
@@ -195,7 +195,7 @@ bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue, const F
 int RunDaqCore(const DaqConfig& cfg,
                volatile std::sig_atomic_t& stop_requested,
                const FramePublishCallback& on_frame_ready) {
-  std::cerr << "[INFO] DAQ run starting\n";
+  std::cerr << "[INFO] DAQ Run starting\n";
   BlockingQueue<FrameRecord> queue;
   std::atomic<bool> running{true};
   std::atomic<bool> writer_ok{true};
@@ -204,7 +204,7 @@ int RunDaqCore(const DaqConfig& cfg,
     if (!run_writer(cfg, queue, on_frame_ready)) {
       writer_ok.store(false);
       running.store(false);
-      queue.close();
+      queue.Close();
     }
   });
 
@@ -219,7 +219,7 @@ int RunDaqCore(const DaqConfig& cfg,
     if (cfg.duration_sec > 0) {
       const auto elapsed = std::chrono::steady_clock::now() - start;
       if (elapsed >= std::chrono::seconds(cfg.duration_sec)) {
-        std::cerr << "[INFO] duration reached, stopping run\n";
+        std::cerr << "[INFO] duration reached, stopping Run\n";
         running.store(false);
         break;
       }
@@ -238,13 +238,13 @@ int RunDaqCore(const DaqConfig& cfg,
     }
   }
 
-  queue.close();
+  queue.Close();
 
   if (writer.joinable()) {
     writer.join();
   }
 
   const int rc = writer_ok.load() ? 0 : 1;
-  std::cerr << "[INFO] DAQ run finished rc=" << rc << "\n";
+  std::cerr << "[INFO] DAQ Run finished rc=" << rc << "\n";
   return rc;
 }

@@ -10,10 +10,10 @@ RootTreeSink::RootTreeSink(const IDecoder* decoder, std::string output_path)
 
 RootTreeSink::~RootTreeSink() {
   std::string ignored_error;
-  finalize(ignored_error);
+  Finalise(ignored_error);
 }
 
-bool RootTreeSink::ensure_open(std::string& error_text) {
+bool RootTreeSink::EnsureOpen(std::string& error_text) {
   error_text.clear();
   if (decoder_ == nullptr) {
     error_text = "ROOT sink has null decoder";
@@ -23,7 +23,7 @@ bool RootTreeSink::ensure_open(std::string& error_text) {
     return true;
   }
 
-  branch_defs_ = decoder_->tree_branches();
+  branch_defs_ = decoder_->TreeBranches();
   if (branch_defs_.empty()) {
     error_text = "decoder returned empty branch definitions";
     return false;
@@ -66,13 +66,13 @@ bool RootTreeSink::ensure_open(std::string& error_text) {
   return true;
 }
 
-bool RootTreeSink::consume(const DecodedMessage& message, std::string& error_text) {
-  if (!ensure_open(error_text)) {
+bool RootTreeSink::Consume(const DecodedMessage& message, std::string& error_text) {
+  if (!EnsureOpen(error_text)) {
     return false;
   }
 
   std::vector<TreeValue> values;
-  if (!decoder_->decoded_to_tree_values(message, values, error_text)) {
+  if (!decoder_->DecodedToTreeValues(message, values, error_text)) {
     return false;
   }
   if (values.size() != branch_defs_.size()) {
@@ -98,7 +98,7 @@ bool RootTreeSink::consume(const DecodedMessage& message, std::string& error_tex
   return true;
 }
 
-bool RootTreeSink::finalize(std::string& error_text) {
+bool RootTreeSink::Finalise(std::string& error_text) {
   error_text.clear();
   if (finalised_) {
     return true;
@@ -106,7 +106,7 @@ bool RootTreeSink::finalize(std::string& error_text) {
   finalised_ = true;
 
   if (file_ == nullptr) {
-    if (!ensure_open(error_text)) {
+    if (!EnsureOpen(error_text)) {
       return false;
     }
   }

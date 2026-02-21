@@ -19,12 +19,12 @@ class RealtimeAnalysisSink : public IEventSink {
                                 uint32_t gui_update_interval_ms = 50);
   ~RealtimeAnalysisSink() override;
 
-  bool consume(const DecodedMessage& message, std::string& error_text) override;
-  bool finalize(std::string& error_text) override;
+  bool Consume(const DecodedMessage& message, std::string& error_text) override;
+  bool Finalise(std::string& error_text) override;
 
   // Called through IRealtimeDisplayRegistry implementation in sink_realtime.cpp.
-  bool register_canvas(TCanvas* canvas, std::string& error_text);
-  bool register_drawable(TVirtualPad* pad, TObject* object, const char* draw_option, std::string& error_text);
+  bool RegisterCanvas(TCanvas* canvas, std::string& error_text);
+  bool RegisterDrawable(TVirtualPad* pad, TObject* object, const char* draw_option, std::string& error_text);
 
  private:
   struct DrawableBinding {
@@ -33,9 +33,9 @@ class RealtimeAnalysisSink : public IEventSink {
     std::string draw_option;
   };
 
-  bool ensure_initialized(std::string& error_text);
-  void redraw_all();
-  void pump_gui();
+  bool EnsureInitialised(std::string& error_text);
+  void RedrawAll();
+  void PumpGui();
 
   std::vector<std::unique_ptr<IRealtimeAnalysis>> analyses_;
   bool initialised_ = false;

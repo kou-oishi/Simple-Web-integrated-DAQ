@@ -54,7 +54,7 @@ ZmqDataFrameSource::~ZmqDataFrameSource() {
   }
 }
 
-bool ZmqDataFrameSource::ensure_connected(std::string& error_text) {
+bool ZmqDataFrameSource::EnsureConnected(std::string& error_text) {
   if (connected_) {
     return true;
   }
@@ -92,7 +92,7 @@ bool ZmqDataFrameSource::ensure_connected(std::string& error_text) {
   return true;
 }
 
-SourceStatus ZmqDataFrameSource::next_frame(FrameEnvelope& out_frame,
+SourceStatus ZmqDataFrameSource::NextFrame(FrameEnvelope& out_frame,
                                             std::string& error_text,
                                             const volatile std::sig_atomic_t* stop_requested) {
   out_frame.payload.clear();
@@ -101,7 +101,7 @@ SourceStatus ZmqDataFrameSource::next_frame(FrameEnvelope& out_frame,
     return SourceStatus::kEof;
   }
 
-  if (!ensure_connected(error_text)) {
+  if (!EnsureConnected(error_text)) {
     return SourceStatus::kError;
   }
 

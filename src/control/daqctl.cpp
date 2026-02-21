@@ -14,7 +14,7 @@ namespace {
 void print_usage(const char* prog) {
   std::cerr << "Usage: " << prog << " [--endpoint <zmq-endpoint>] <command> [args...]\n";
   std::cerr << "Options:\n";
-  std::cerr << "  -e, --endpoint <ep>  Control endpoint to connect\n";
+  std::cerr << "  -e, --endpoint <ep>  Control endpoint to Connect\n";
   std::cerr << "  -h, --help           Show this help\n";
   std::cerr << "Commands:\n";
   std::cerr << "  status\n";
@@ -116,7 +116,7 @@ int main(int argc, char** argv) {
   ZmqControlClient client(endpoint);
   std::string reply;
   std::string error_text;
-  if (!client.request(req, reply, error_text)) {
+  if (!client.Request(req, reply, error_text)) {
     std::cerr << error_text << "\n";
     return 1;
   }

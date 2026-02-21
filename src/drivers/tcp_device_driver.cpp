@@ -19,10 +19,10 @@ TcpDeviceDriver::TcpDeviceDriver(std::string host,
       network_word_bytes_(network_word_bytes == 0 ? 1 : network_word_bytes),
       sock_fd_(-1) {}
 
-TcpDeviceDriver::~TcpDeviceDriver() { disconnect_device(); }
+TcpDeviceDriver::~TcpDeviceDriver() { DisconnectDevice(); }
 
-bool TcpDeviceDriver::connect_device() {
-  disconnect_device();
+bool TcpDeviceDriver::ConnectDevice() {
+  DisconnectDevice();
   pending_network_bytes_.clear();
   converted_host_bytes_.clear();
 
@@ -56,7 +56,7 @@ bool TcpDeviceDriver::connect_device() {
   return connected;
 }
 
-void TcpDeviceDriver::disconnect_device() {
+void TcpDeviceDriver::DisconnectDevice() {
   if (sock_fd_ >= 0) {
     ::close(sock_fd_);
     sock_fd_ = -1;
@@ -65,7 +65,7 @@ void TcpDeviceDriver::disconnect_device() {
   converted_host_bytes_.clear();
 }
 
-ReadStatus TcpDeviceDriver::read_bytes(std::vector<uint8_t>& out_bytes, size_t max_bytes, int timeout_ms) {
+ReadStatus TcpDeviceDriver::ReadBytes(std::vector<uint8_t>& out_bytes, size_t max_bytes, int timeout_ms) {
   if (sock_fd_ < 0) {
     return ReadStatus::kDisconnected;
   }
@@ -124,7 +124,7 @@ ReadStatus TcpDeviceDriver::read_bytes(std::vector<uint8_t>& out_bytes, size_t m
     pending_network_bytes_.insert(pending_network_bytes_.end(), network_chunk.begin(), network_chunk.end());
 
     while (pending_network_bytes_.size() >= network_word_bytes_) {
-      append_network_word_as_host(pending_network_bytes_.data(), network_word_bytes_, converted_host_bytes_);
+      AppendNetworkWordAsHost(pending_network_bytes_.data(), network_word_bytes_, converted_host_bytes_);
       pending_network_bytes_.erase(pending_network_bytes_.begin(),
                                    pending_network_bytes_.begin() + static_cast<std::ptrdiff_t>(network_word_bytes_));
     }
@@ -140,12 +140,12 @@ ReadStatus TcpDeviceDriver::read_bytes(std::vector<uint8_t>& out_bytes, size_t m
   return ReadStatus::kOk;
 }
 
-bool TcpDeviceDriver::is_little_endian_host() {
+bool TcpDeviceDriver::IsLittleEndianHost() {
   const uint16_t probe = 1;
   return reinterpret_cast<const uint8_t*>(&probe)[0] == 1;
 }
 
-void TcpDeviceDriver::append_network_word_as_host(const uint8_t* network_word,
+void TcpDeviceDriver::AppendNetworkWordAsHost(const uint8_t* network_word,
                                                    std::size_t word_bytes,
                                                    std::vector<uint8_t>& out_bytes) {
   if (word_bytes == 0) {
@@ -153,7 +153,7 @@ void TcpDeviceDriver::append_network_word_as_host(const uint8_t* network_word,
   }
 
   out_bytes.reserve(out_bytes.size() + word_bytes);
-  if (!is_little_endian_host()) {
+  if (!IsLittleEndianHost()) {
     out_bytes.insert(out_bytes.end(), network_word, network_word + static_cast<std::ptrdiff_t>(word_bytes));
     return;
   }

@@ -37,9 +37,9 @@ class ValidationResult {
     return ValidationResult(Status::kFatalError, code, std::move(message), detail_code, std::move(detail_tag));
   }
 
-  bool ok() const { return status_ == Status::kOk; }
-  bool recoverable() const { return status_ == Status::kRecoverableError; }
-  bool fatal() const { return status_ == Status::kFatalError; }
+  bool IsOk() const { return status_ == Status::kOk; }
+  bool IsRecoverable() const { return status_ == Status::kRecoverableError; }
+  bool IsFatal() const { return status_ == Status::kFatalError; }
 
   Status status() const { return status_; }
   ErrorCode code() const { return code_; }

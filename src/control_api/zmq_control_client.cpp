@@ -13,7 +13,7 @@ constexpr int kRecvTimeoutMs = 2000;
 
 ZmqControlClient::ZmqControlClient(std::string endpoint) : endpoint_(std::move(endpoint)) {}
 
-bool ZmqControlClient::request(const std::string& request, std::string& reply, std::string& error_text) const {
+bool ZmqControlClient::Request(const std::string& Request, std::string& reply, std::string& error_text) const {
   reply.clear();
   error_text.clear();
 
@@ -40,7 +40,7 @@ bool ZmqControlClient::request(const std::string& request, std::string& reply, s
     return false;
   }
 
-  if (zmq_send(req_sock, request.data(), request.size(), 0) < 0) {
+  if (zmq_send(req_sock, Request.data(), Request.size(), 0) < 0) {
     error_text = "send failed";
     zmq_close(req_sock);
     zmq_ctx_term(ctx);

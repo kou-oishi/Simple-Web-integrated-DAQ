@@ -90,7 +90,7 @@ class DaqService {
 
   std::string status() const {
     std::lock_guard<std::mutex> lock(mu_);
-    return "ok " + status_fields_locked();
+    return "Ok " + status_fields_locked();
   }
 
   std::string status_fields() const {
@@ -147,7 +147,7 @@ class DaqService {
       }
     });
 
-    return "ok started";
+    return "Ok started";
   }
 
   std::string stop() {
@@ -173,7 +173,7 @@ class DaqService {
       }
     }
 
-    return "ok stopped";
+    return "Ok stopped";
   }
 
   void shutdown() {
@@ -202,7 +202,7 @@ class DaqService {
         << " healthy=" << (state_ == "error" ? 0 : 1)
         << " last_exit=" << last_exit_code_
         << " events_total=" << published_events_
-        << " run=" << current_run_number_locked()
+        << " Run=" << current_run_number_locked()
         << " events_in_run=" << events_in_current_run_;
     if (running_) {
       const auto elapsed = std::chrono::steady_clock::now() - started_at_;
@@ -442,7 +442,7 @@ int main(int argc, char** argv) {
         resp = svc.stop();
       } else if (cmd == "shutdown") {
         svc.shutdown();
-        resp = "ok shutting down";
+        resp = "Ok shutting down";
       } else {
         resp = "error unknown command";
       }
@@ -453,12 +453,12 @@ int main(int argc, char** argv) {
     }
 
     const std::string state = svc.state_name();
-    const uint32_t run = svc.current_run_number();
+    const uint32_t Run = svc.current_run_number();
     const auto now = std::chrono::steady_clock::now();
     const bool periodic = (now - last_status_pub) >= std::chrono::seconds(1);
-    if (state != last_state || run != last_run || periodic) {
+    if (state != last_state || Run != last_run || periodic) {
       last_state = state;
-      last_run = run;
+      last_run = Run;
       last_status_pub = now;
       publish_status(pub, svc.status_fields());
     }

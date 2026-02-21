@@ -46,21 +46,21 @@ void print_usage(const char* prog) {
   std::cerr << "Usage: " << prog
             << " [input_file.dat] [--live-output-dir <dir> | --data-endpoint <zmq-endpoint>] [options]\n";
   std::cerr << "Options:\n";
-  std::cerr << "  -l, --live-output-dir <dir>  Read live run files from output directory\n";
+  std::cerr << "  -l, --live-output-dir <dir>  Read live Run files from output directory\n";
   std::cerr << "  -e, --data-endpoint <ep>      Subscribe directly to ZMQ data endpoint (default: "
             << daq_defaults::kDataEndpoint << ")\n";
-  std::cerr << "  -d, --decoder <name[=spec]>   Decoder module and optional decoder spec (e.g. kc705_tof)\n";
+  std::cerr << "  -d, --decoder <Name[=spec]>   Decoder module and optional decoder spec (e.g. kc705_tof)\n";
   std::cerr << "  -m, --max-events <n>          Maximum events to decode (0 means all)\n";
   std::cerr << "  -p, --print-every <n>         Console summary interval (default: 1000)\n";
-  std::cerr << "  -r, --run-start <n>           Live mode starting run number (default: "
+  std::cerr << "  -r, --Run-start <n>           Live mode starting Run number (default: "
             << daq_defaults::kRunStart << ")\n";
   std::cerr << "  -q, --poll-ms <n>             Poll interval in milliseconds (default: 200)\n";
   std::cerr << "  -i, --idle-timeout-sec <n>    Stop after n seconds with no data (0 means never)\n";
-  std::cerr << "  -t, --text-stream             Enable per-event text output\n";
+  std::cerr << "  -t, --text-stream             Enable per-Event text output\n";
   std::cerr << "  -o, --text-output <path|->    Text output destination ('-' means stdout)\n";
   std::cerr << "  -n, --no-console              Disable default console sink\n";
   std::cerr << "  -O, --root-out <file.root>    Write decoded events to ROOT TTree output\n";
-  std::cerr << "  -a, --analysis <name[=spec]>  Enable realtime analysis module (repeatable)\n";
+  std::cerr << "  -a, --analysis <Name[=spec]>  Enable realtime analysis module (repeatable)\n";
   std::cerr << "  -h, --help                    Show this help\n";
 }
 
@@ -94,7 +94,7 @@ bool parse_args(int argc, char** argv, Options& options) {
       {"decoder", required_argument, nullptr, 'd'},
       {"max-events", required_argument, nullptr, 'm'},
       {"print-every", required_argument, nullptr, 'p'},
-      {"run-start", required_argument, nullptr, 'r'},
+      {"Run-start", required_argument, nullptr, 'r'},
       {"poll-ms", required_argument, nullptr, 'q'},
       {"idle-timeout-sec", required_argument, nullptr, 'i'},
       {"text-stream", no_argument, nullptr, 't'},
@@ -137,7 +137,7 @@ bool parse_args(int argc, char** argv, Options& options) {
         break;
       case 'r':
         if (!parse_uint32(optarg, options.run_start)) {
-          std::cerr << "Invalid --run-start\n";
+          std::cerr << "Invalid --Run-start\n";
           return false;
         }
         break;
@@ -220,14 +220,14 @@ bool parse_args(int argc, char** argv, Options& options) {
   return true;
 }
 
-void split_decoder_arg(const std::string& arg, std::string& name, std::string& spec) {
+void split_decoder_arg(const std::string& arg, std::string& Name, std::string& spec) {
   const std::size_t eq = arg.find('=');
   if (eq == std::string::npos) {
-    name = arg;
+    Name = arg;
     spec.clear();
     return;
   }
-  name = arg.substr(0, eq);
+  Name = arg.substr(0, eq);
   spec = arg.substr(eq + 1);
 }
 
@@ -247,7 +247,7 @@ int main(int argc, char** argv) {
   std::string decoder_spec;
   split_decoder_arg(options.decoder, decoder_name, decoder_spec);
   if (decoder_name.empty()) {
-    std::cerr << "Decoder name is empty\n";
+    std::cerr << "Decoder Name is empty\n";
     return 1;
   }
 
@@ -265,8 +265,8 @@ int main(int argc, char** argv) {
   std::size_t frame_size = 0;
   std::string error_text;
   std::unique_ptr<IDecoder> decoder;
-  if (!factory->create(decoder_spec, decoder, frame_size, error_text)) {
-    std::cerr << "Failed to create decoder '" << decoder_name << "': " << error_text << "\n";
+  if (!factory->Create(decoder_spec, decoder, frame_size, error_text)) {
+    std::cerr << "Failed to Create decoder '" << decoder_name << "': " << error_text << "\n";
     return 1;
   }
   if (decoder == nullptr || frame_size == 0) {
@@ -301,7 +301,7 @@ int main(int argc, char** argv) {
       std::string analysis_spec;
       split_decoder_arg(analysis_arg, analysis_name, analysis_spec);
       if (analysis_name.empty()) {
-        std::cerr << "Analysis name is empty\n";
+        std::cerr << "Analysis Name is empty\n";
         return 1;
       }
 
@@ -321,22 +321,22 @@ int main(int argc, char** argv) {
         return 1;
       }
 
-      const std::string expected_decoder = factory->expected_decoder() == nullptr ? "" : factory->expected_decoder();
-      if (!expected_decoder.empty() && expected_decoder != decoder_name) {
-        std::cerr << "Analysis '" << analysis_name << "' requires decoder '" << expected_decoder
+      const std::string ExpectedDecoder = factory->ExpectedDecoder() == nullptr ? "" : factory->ExpectedDecoder();
+      if (!ExpectedDecoder.empty() && ExpectedDecoder != decoder_name) {
+        std::cerr << "Analysis '" << analysis_name << "' requires decoder '" << ExpectedDecoder
                   << "', but selected decoder is '" << decoder_name << "'\n";
         return 1;
       }
 
       ParsedAnalysisSpec parsed_spec;
-      if (!parsed_spec.parse(analysis_spec, error_text)) {
+      if (!parsed_spec.Parse(analysis_spec, error_text)) {
         std::cerr << "Invalid spec for analysis '" << analysis_name << "': " << error_text << "\n";
         return 1;
       }
 
       std::unique_ptr<IRealtimeAnalysis> analysis;
-      if (!factory->create(parsed_spec, analysis, error_text)) {
-        std::cerr << "Failed to create analysis '" << analysis_name << "': " << error_text << "\n";
+      if (!factory->Create(parsed_spec, analysis, error_text)) {
+        std::cerr << "Failed to Create analysis '" << analysis_name << "': " << error_text << "\n";
         return 1;
       }
       if (!analysis) {
@@ -369,7 +369,7 @@ int main(int argc, char** argv) {
   MonitorPipeline pipeline(std::move(source), std::move(decoder), std::move(sinks));
 
   error_text.clear();
-  if (!pipeline.run(options.max_events, error_text, &g_stop_requested)) {
+  if (!pipeline.Run(options.max_events, error_text, &g_stop_requested)) {
     std::cerr << "datamon failed: " << error_text << "\n";
     return 1;
   }

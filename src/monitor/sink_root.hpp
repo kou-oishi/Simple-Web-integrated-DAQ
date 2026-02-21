@@ -10,11 +10,11 @@ class RootTreeSink : public IEventSink {
   RootTreeSink(const IDecoder* decoder, std::string output_path);
   ~RootTreeSink() override;
 
-  bool consume(const DecodedMessage& message, std::string& error_text) override;
-  bool finalize(std::string& error_text) override;
+  bool Consume(const DecodedMessage& message, std::string& error_text) override;
+  bool Finalise(std::string& error_text) override;
 
  private:
-  bool ensure_open(std::string& error_text);
+  bool EnsureOpen(std::string& error_text);
 
   const IDecoder* decoder_;
   std::string output_path_;

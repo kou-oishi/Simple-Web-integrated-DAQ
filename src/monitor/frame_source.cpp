@@ -12,9 +12,9 @@
 FileFrameSource::FileFrameSource(std::string path, std::size_t frame_size)
     : path_(std::move(path)), frame_size_(frame_size) {}
 
-uint32_t FileFrameSource::detect_run_number_from_path() const {
+uint32_t FileFrameSource::DetectRunNumberFromPath() const {
   const std::string filename = std::filesystem::path(path_).filename().string();
-  const std::size_t run_pos = filename.find("run");
+  const std::size_t run_pos = filename.find("Run");
   if (run_pos == std::string::npos) {
     return 0;
   }
@@ -29,7 +29,7 @@ uint32_t FileFrameSource::detect_run_number_from_path() const {
   return saw_digit ? value : 0;
 }
 
-SourceStatus FileFrameSource::next_frame(FrameEnvelope& out_frame,
+SourceStatus FileFrameSource::NextFrame(FrameEnvelope& out_frame,
                                          std::string& error_text,
                                          const volatile std::sig_atomic_t* stop_requested) {
   out_frame.payload.clear();
@@ -49,7 +49,7 @@ SourceStatus FileFrameSource::next_frame(FrameEnvelope& out_frame,
       error_text = "failed to open input file: " + path_;
       return SourceStatus::kError;
     }
-    run_number_ = detect_run_number_from_path();
+    run_number_ = DetectRunNumberFromPath();
     next_event_number_ = 0;
     opened_ = true;
   }
@@ -92,26 +92,26 @@ LiveRunFileSource::LiveRunFileSource(std::string output_dir,
 
 std::string LiveRunFileSource::run_path(uint32_t run_number) const {
   std::ostringstream oss;
-  oss << output_dir_ << "/run" << std::setw(daq_defaults::kRunNumberWidth) << std::setfill('0') << run_number
+  oss << output_dir_ << "/Run" << std::setw(daq_defaults::kRunNumberWidth) << std::setfill('0') << run_number
       << ".dat";
   return oss.str();
 }
 
-bool LiveRunFileSource::open_current_file(std::string& error_text) {
+bool LiveRunFileSource::OpenCurrentFile(std::string& error_text) {
   if (ifs_.has_value() && ifs_->is_open()) {
     return true;
   }
 
   const std::string path = run_path(current_run_);
   if (!std::filesystem::exists(path)) {
-    error_text = "waiting for run file: " + path;
+    error_text = "waiting for Run file: " + path;
     return false;
   }
 
   ifs_.emplace();
   ifs_->open(path, std::ios::binary);
   if (!ifs_->is_open()) {
-    error_text = "failed to open run file: " + path;
+    error_text = "failed to open Run file: " + path;
     ifs_.reset();
     return false;
   }
@@ -121,11 +121,11 @@ bool LiveRunFileSource::open_current_file(std::string& error_text) {
   return true;
 }
 
-bool LiveRunFileSource::try_advance_next_run(std::string& error_text) {
+bool LiveRunFileSource::TryAdvanceNextRun(std::string& error_text) {
   const uint32_t next_run = current_run_ + 1;
   const std::string next_path = run_path(next_run);
   if (!std::filesystem::exists(next_path)) {
-    error_text = "waiting for next run file: " + next_path;
+    error_text = "waiting for next Run file: " + next_path;
     return false;
   }
 
@@ -134,10 +134,10 @@ bool LiveRunFileSource::try_advance_next_run(std::string& error_text) {
   }
   ifs_.reset();
   current_run_ = next_run;
-  return open_current_file(error_text);
+  return OpenCurrentFile(error_text);
 }
 
-SourceStatus LiveRunFileSource::next_frame(FrameEnvelope& out_frame,
+SourceStatus LiveRunFileSource::NextFrame(FrameEnvelope& out_frame,
                                            std::string& error_text,
                                            const volatile std::sig_atomic_t* stop_requested) {
   out_frame.payload.clear();
@@ -164,7 +164,7 @@ SourceStatus LiveRunFileSource::next_frame(FrameEnvelope& out_frame,
       return SourceStatus::kEof;
     }
 
-    if (!open_current_file(error_text)) {
+    if (!OpenCurrentFile(error_text)) {
       if (is_timed_out()) {
         return SourceStatus::kEof;
       }
@@ -188,7 +188,7 @@ SourceStatus LiveRunFileSource::next_frame(FrameEnvelope& out_frame,
       ifs_->seekg(-n, std::ios::cur);
     }
 
-    if (try_advance_next_run(error_text)) {
+    if (TryAdvanceNextRun(error_text)) {
       continue;
     }
 

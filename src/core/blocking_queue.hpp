@@ -8,7 +8,7 @@
 template <typename T>
 class BlockingQueue {
  public:
-  bool push(T item) {
+  bool Push(T item) {
     std::lock_guard<std::mutex> lock(mu_);
     if (closed_) {
       return false;
@@ -18,7 +18,7 @@ class BlockingQueue {
     return true;
   }
 
-  bool pop(T& out) {
+  bool Pop(T& out) {
     std::unique_lock<std::mutex> lock(mu_);
     cv_.wait(lock, [&] { return closed_ || !q_.empty(); });
     if (q_.empty()) {
@@ -29,7 +29,7 @@ class BlockingQueue {
     return true;
   }
 
-  void close() {
+  void Close() {
     std::lock_guard<std::mutex> lock(mu_);
     closed_ = true;
     cv_.notify_all();

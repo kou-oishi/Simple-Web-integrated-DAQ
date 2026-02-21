@@ -16,9 +16,9 @@ uint64_t read_be_u64(const uint8_t* p) {
 
 Kc705TofValidator::Kc705TofValidator(uint8_t expected_board_id) : expected_board_id_(expected_board_id) {}
 
-void Kc705TofValidator::reset() { buffer_.clear(); }
+void Kc705TofValidator::Reset() { buffer_.clear(); }
 
-ValidationResult Kc705TofValidator::feed(const uint8_t* data, size_t size, std::vector<std::vector<uint8_t>>& out_frames) {
+ValidationResult Kc705TofValidator::Feed(const uint8_t* data, size_t size, std::vector<std::vector<uint8_t>>& out_frames) {
   out_frames.clear();
 
   if (data == nullptr && size > 0) {

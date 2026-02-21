@@ -5,19 +5,19 @@ MonitorPipeline::MonitorPipeline(std::unique_ptr<IFrameSource> source,
                                  std::vector<std::unique_ptr<IEventSink>> sinks)
     : source_(std::move(source)), decoder_(std::move(decoder)), sinks_(std::move(sinks)) {}
 
-bool MonitorPipeline::run(uint64_t max_events,
+bool MonitorPipeline::Run(uint64_t max_events,
                           std::string& error_text,
                           const volatile std::sig_atomic_t* stop_requested) {
   error_text.clear();
 
-  auto finalize_sinks = [&](std::string& out_error_text) -> bool {
-    std::string finalize_error;
+  auto finalise_sinks = [&](std::string& out_error_text) -> bool {
+    std::string finalise_error;
     for (auto& sink : sinks_) {
-      if (!sink->finalize(finalize_error)) {
+      if (!sink->Finalise(finalise_error)) {
         if (out_error_text.empty()) {
-          out_error_text = finalize_error;
+          out_error_text = finalise_error;
         } else {
-          out_error_text += " | finalize failed: " + finalize_error;
+          out_error_text += " | Finalise failed: " + finalise_error;
         }
         return false;
       }
@@ -32,26 +32,26 @@ bool MonitorPipeline::run(uint64_t max_events,
     }
 
     FrameEnvelope frame;
-    const SourceStatus st = source_->next_frame(frame, error_text, stop_requested);
+    const SourceStatus st = source_->NextFrame(frame, error_text, stop_requested);
     if (st == SourceStatus::kEof) {
       break;
     }
     if (st == SourceStatus::kError) {
-      (void)finalize_sinks(error_text);
+      (void)finalise_sinks(error_text);
       return false;
     }
 
     DecodedMessage message;
     message.run_number = frame.run_number;
     message.event_number = frame.event_number;
-    if (!decoder_->decode_frame(frame.payload, message, error_text)) {
-      (void)finalize_sinks(error_text);
+    if (!decoder_->DecodeFrame(frame.payload, message, error_text)) {
+      (void)finalise_sinks(error_text);
       return false;
     }
 
     for (auto& sink : sinks_) {
-      if (!sink->consume(message, error_text)) {
-        (void)finalize_sinks(error_text);
+      if (!sink->Consume(message, error_text)) {
+        (void)finalise_sinks(error_text);
         return false;
       }
     }
@@ -59,5 +59,5 @@ bool MonitorPipeline::run(uint64_t max_events,
     ++idx;
   }
 
-  return finalize_sinks(error_text);
+  return finalise_sinks(error_text);
 }

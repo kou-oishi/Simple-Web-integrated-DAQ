@@ -58,14 +58,14 @@ int main(int argc, char** argv) {
 
   ZmqStatusSubscriber sub(status_endpoint);
   std::string error_text;
-  if (!sub.connect(error_text)) {
+  if (!sub.Connect(error_text)) {
     std::cerr << error_text << "\n";
     return 1;
   }
 
   while (true) {
     std::string payload;
-    if (!sub.receive_next(payload, error_text)) {
+    if (!sub.ReceiveNext(payload, error_text)) {
       std::cerr << error_text << "\n";
       return 1;
     }

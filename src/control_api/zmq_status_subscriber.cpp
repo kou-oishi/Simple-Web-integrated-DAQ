@@ -17,7 +17,7 @@ ZmqStatusSubscriber::~ZmqStatusSubscriber() {
   }
 }
 
-bool ZmqStatusSubscriber::connect(std::string& error_text) {
+bool ZmqStatusSubscriber::Connect(std::string& error_text) {
   error_text.clear();
 
   ctx_ = zmq_ctx_new();
@@ -49,7 +49,7 @@ bool ZmqStatusSubscriber::connect(std::string& error_text) {
   return true;
 }
 
-bool ZmqStatusSubscriber::receive_next(std::string& payload, std::string& error_text) {
+bool ZmqStatusSubscriber::ReceiveNext(std::string& payload, std::string& error_text) {
   payload.clear();
   error_text.clear();
 

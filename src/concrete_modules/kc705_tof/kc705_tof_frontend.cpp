@@ -26,7 +26,7 @@ bool parse_u32(const std::string& s, uint32_t& out) {
 
 }  // namespace
 
-bool Kc705TofFrontend::parse_device_spec(const std::string& spec_after_equals,
+bool Kc705TofFrontend::ParseDeviceSpec(const std::string& spec_after_equals,
                                          DeviceSpec& out_device,
                                          std::string& error_message) const {
   const size_t at = spec_after_equals.find('@');
@@ -51,18 +51,18 @@ bool Kc705TofFrontend::parse_device_spec(const std::string& spec_after_equals,
     return false;
   }
 
-  out_device.frontend = id();
+  out_device.frontend = Id();
   out_device.board_id = static_cast<uint8_t>(board_u32);
   out_device.host = host;
   out_device.port = static_cast<uint16_t>(port_u32);
   return true;
 }
 
-std::unique_ptr<IDeviceDriver> Kc705TofFrontend::create_driver(const DeviceSpec& device) const {
+std::unique_ptr<IDeviceDriver> Kc705TofFrontend::CreateDriver(const DeviceSpec& device) const {
   return std::make_unique<TcpDeviceDriver>(device.host, device.port, TcpDeviceDriver::EndianMode::kRawBytes);
 }
 
-std::unique_ptr<IDataValidator> Kc705TofFrontend::create_validator(const DeviceSpec& device) const {
+std::unique_ptr<IDataValidator> Kc705TofFrontend::CreateValidator(const DeviceSpec& device) const {
   return std::make_unique<Kc705TofValidator>(device.board_id);
 }
 

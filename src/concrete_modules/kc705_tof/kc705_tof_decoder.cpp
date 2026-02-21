@@ -15,12 +15,12 @@ uint64_t read_be_u64(const uint8_t* p) {
 }
 
 bool message_to_event(const DecodedMessage& message, Kc705TofEvent& out_event, std::string& error_text) {
-  const auto* event = std::any_cast<Kc705TofEvent>(&message.payload);
-  if (event == nullptr) {
+  const auto* Event = std::any_cast<Kc705TofEvent>(&message.payload);
+  if (Event == nullptr) {
     error_text = "kc705_tof decoder received unsupported decoded payload type";
     return false;
   }
-  out_event = *event;
+  out_event = *Event;
   return true;
 }
 
@@ -45,21 +45,21 @@ bool Kc705TofDecoder::frame_to_event(const std::vector<uint8_t>& frame,
   return true;
 }
 
-bool Kc705TofDecoder::decode_frame(const std::vector<uint8_t>& frame,
+bool Kc705TofDecoder::DecodeFrame(const std::vector<uint8_t>& frame,
                                    DecodedMessage& out_message,
                                    std::string& error_text) {
-  Kc705TofEvent event;
-  if (!frame_to_event(frame, event, error_text)) {
+  Kc705TofEvent Event;
+  if (!frame_to_event(frame, Event, error_text)) {
     return false;
   }
-  event.run_number = out_message.run_number;
-  event.event_number = out_message.event_number;
+  Event.run_number = out_message.run_number;
+  Event.event_number = out_message.event_number;
 
-  out_message.payload = event;
+  out_message.payload = Event;
   return true;
 }
 
-std::vector<TreeBranchDef> Kc705TofDecoder::tree_branches() const {
+std::vector<TreeBranchDef> Kc705TofDecoder::TreeBranches() const {
   return {
       {"raw_word", TreeValueType::kU64},
       {"board_id", TreeValueType::kU64},
@@ -68,39 +68,39 @@ std::vector<TreeBranchDef> Kc705TofDecoder::tree_branches() const {
   };
 }
 
-bool Kc705TofDecoder::decoded_to_tree_values(const DecodedMessage& message,
+bool Kc705TofDecoder::DecodedToTreeValues(const DecodedMessage& message,
                                              std::vector<TreeValue>& out_values,
                                              std::string& error_text) const {
-  Kc705TofEvent event;
-  if (!message_to_event(message, event, error_text)) {
+  Kc705TofEvent Event;
+  if (!message_to_event(message, Event, error_text)) {
     return false;
   }
 
   out_values.clear();
   out_values.reserve(4);
-  out_values.push_back(TreeValue::FromU64(event.raw_word));
-  out_values.push_back(TreeValue::FromU64(static_cast<uint64_t>(event.board_id)));
-  out_values.push_back(TreeValue::FromU64(static_cast<uint64_t>(event.channel_id)));
-  out_values.push_back(TreeValue::FromF64(static_cast<double>(event.tof)));
+  out_values.push_back(TreeValue::FromU64(Event.raw_word));
+  out_values.push_back(TreeValue::FromU64(static_cast<uint64_t>(Event.board_id)));
+  out_values.push_back(TreeValue::FromU64(static_cast<uint64_t>(Event.channel_id)));
+  out_values.push_back(TreeValue::FromF64(static_cast<double>(Event.tof)));
   return true;
 }
 
-bool Kc705TofDecoder::format_decoded(const DecodedMessage& message, std::string& out_text, std::string& error_text) const {
-  Kc705TofEvent event;
-  if (!message_to_event(message, event, error_text)) {
+bool Kc705TofDecoder::FormatDecoded(const DecodedMessage& message, std::string& out_text, std::string& error_text) const {
+  Kc705TofEvent Event;
+  if (!message_to_event(message, Event, error_text)) {
     return false;
   }
 
   std::ostringstream oss;
-  oss << "board=" << static_cast<unsigned>(event.board_id) << " ch=" << static_cast<unsigned>(event.channel_id)
-      << " tof=" << event.tof;
+  oss << "board=" << static_cast<unsigned>(Event.board_id) << " ch=" << static_cast<unsigned>(Event.channel_id)
+      << " tof=" << Event.tof;
   out_text = oss.str();
   return true;
 }
 
-const char* Kc705TofDecoderFactory::name() const { return "kc705_tof"; }
+const char* Kc705TofDecoderFactory::Name() const { return "kc705_tof"; }
 
-bool Kc705TofDecoderFactory::create(const std::string& spec,
+bool Kc705TofDecoderFactory::Create(const std::string& spec,
                                     std::unique_ptr<IDecoder>& out_decoder,
                                     std::size_t& out_frame_size,
                                     std::string& error_text) const {

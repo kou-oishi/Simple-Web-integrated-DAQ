@@ -26,9 +26,9 @@ bool RegisterDeviceFrontend(std::unique_ptr<IDeviceFrontend> frontend) {
     return false;
   }
   auto& registry = frontend_registry();
-  const char* id = frontend->id();
+  const char* Id = frontend->Id();
   const auto exists = std::any_of(registry.begin(), registry.end(), [&](const std::unique_ptr<IDeviceFrontend>& item) {
-    return std::string(item->id()) == id;
+    return std::string(item->Id()) == Id;
   });
   if (exists) {
     return false;
@@ -38,12 +38,12 @@ bool RegisterDeviceFrontend(std::unique_ptr<IDeviceFrontend> frontend) {
 }
 
 bool RegisterMonitorDecoderFactory(const IMonitorDecoderFactory* factory) {
-  if (factory == nullptr || factory->name() == nullptr) {
+  if (factory == nullptr || factory->Name() == nullptr) {
     return false;
   }
   auto& registry = decoder_registry();
   const auto exists = std::any_of(registry.begin(), registry.end(),
-                                  [&](const IMonitorDecoderFactory* item) { return std::string(item->name()) == factory->name(); });
+                                  [&](const IMonitorDecoderFactory* item) { return std::string(item->Name()) == factory->Name(); });
   if (exists) {
     return false;
   }
@@ -52,12 +52,12 @@ bool RegisterMonitorDecoderFactory(const IMonitorDecoderFactory* factory) {
 }
 
 bool RegisterRealtimeAnalysisFactory(const IMonitorRealtimeAnalysisFactory* factory) {
-  if (factory == nullptr || factory->name() == nullptr) {
+  if (factory == nullptr || factory->Name() == nullptr) {
     return false;
   }
   auto& registry = analysis_registry();
   const auto exists = std::any_of(registry.begin(), registry.end(), [&](const IMonitorRealtimeAnalysisFactory* item) {
-    return std::string(item->name()) == factory->name();
+    return std::string(item->Name()) == factory->Name();
   });
   if (exists) {
     return false;
@@ -69,7 +69,7 @@ bool RegisterRealtimeAnalysisFactory(const IMonitorRealtimeAnalysisFactory* fact
 const IDeviceFrontend* FindDeviceFrontend(const std::string& frontend_id) {
   const auto& registry = frontend_registry();
   for (const auto& frontend : registry) {
-    if (frontend != nullptr && frontend_id == frontend->id()) {
+    if (frontend != nullptr && frontend_id == frontend->Id()) {
       return frontend.get();
     }
   }
@@ -82,16 +82,16 @@ std::vector<std::string> ListDeviceFrontendIds() {
   ids.reserve(registry.size());
   for (const auto& frontend : registry) {
     if (frontend != nullptr) {
-      ids.emplace_back(frontend->id());
+      ids.emplace_back(frontend->Id());
     }
   }
   return ids;
 }
 
-const IMonitorDecoderFactory* FindMonitorDecoderFactory(const std::string& name) {
+const IMonitorDecoderFactory* FindMonitorDecoderFactory(const std::string& Name) {
   const auto& registry = decoder_registry();
   for (const auto* factory : registry) {
-    if (factory != nullptr && name == factory->name()) {
+    if (factory != nullptr && Name == factory->Name()) {
       return factory;
     }
   }
@@ -104,16 +104,16 @@ std::vector<std::string> ListMonitorDecoderFactories() {
   names.reserve(registry.size());
   for (const auto* factory : registry) {
     if (factory != nullptr) {
-      names.emplace_back(factory->name());
+      names.emplace_back(factory->Name());
     }
   }
   return names;
 }
 
-const IMonitorRealtimeAnalysisFactory* FindRealtimeAnalysisFactory(const std::string& name) {
+const IMonitorRealtimeAnalysisFactory* FindRealtimeAnalysisFactory(const std::string& Name) {
   const auto& registry = analysis_registry();
   for (const auto* factory : registry) {
-    if (factory != nullptr && name == factory->name()) {
+    if (factory != nullptr && Name == factory->Name()) {
       return factory;
     }
   }
@@ -126,7 +126,7 @@ std::vector<std::string> ListRealtimeAnalysisFactories() {
   names.reserve(registry.size());
   for (const auto* factory : registry) {
     if (factory != nullptr) {
-      names.emplace_back(factory->name());
+      names.emplace_back(factory->Name());
     }
   }
   return names;

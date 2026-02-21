@@ -11,13 +11,13 @@ class IDeviceFrontend {
  public:
   virtual ~IDeviceFrontend() = default;
 
-  virtual const char* id() const = 0;
+  virtual const char* Id() const = 0;
 
   // Parse frontend-specific device spec after '=' and populate DeviceSpec.
-  virtual bool parse_device_spec(const std::string& spec_after_equals,
+  virtual bool ParseDeviceSpec(const std::string& spec_after_equals,
                                  DeviceSpec& out_device,
                                  std::string& error_message) const = 0;
 
-  virtual std::unique_ptr<IDeviceDriver> create_driver(const DeviceSpec& device) const = 0;
-  virtual std::unique_ptr<IDataValidator> create_validator(const DeviceSpec& device) const = 0;
+  virtual std::unique_ptr<IDeviceDriver> CreateDriver(const DeviceSpec& device) const = 0;
+  virtual std::unique_ptr<IDataValidator> CreateValidator(const DeviceSpec& device) const = 0;
 };
