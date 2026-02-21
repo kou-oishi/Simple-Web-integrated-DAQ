@@ -332,11 +332,16 @@ def get_ui_config() -> dict[str, Any]:
     except Exception:
         events_per_file = 100000
     comment = str(WEB_CONFIG.get("comment", "") or "")
-    run_log_limit = WEB_CONFIG.get("run_log_limit", 50)
+    main_run_log_limit = WEB_CONFIG.get("main_run_log_limit", WEB_CONFIG.get("run_log_limit", 50))
     try:
-        run_log_limit = int(run_log_limit)
+        main_run_log_limit = int(main_run_log_limit)
     except Exception:
-        run_log_limit = 50
+        main_run_log_limit = 50
+    run_log_page_limit = WEB_CONFIG.get("run_log_page_limit", WEB_CONFIG.get("run_log_limit", 200))
+    try:
+        run_log_page_limit = int(run_log_page_limit)
+    except Exception:
+        run_log_page_limit = 200
     daqd_log_limit = WEB_CONFIG.get("daqd_log_limit", 300)
     try:
         daqd_log_limit = int(daqd_log_limit)
@@ -368,7 +373,8 @@ def get_ui_config() -> dict[str, Any]:
         "output_dir": default_output_dir,
         "events_per_file": events_per_file,
         "comment": comment,
-        "run_log_limit": run_log_limit,
+        "main_run_log_limit": main_run_log_limit,
+        "run_log_page_limit": run_log_page_limit,
         "daqd_log_limit": daqd_log_limit,
         "startup_connect_timeout_sec": startup_connect_timeout_sec,
         "reconnect_failure_timeout_sec": reconnect_failure_timeout_sec,
@@ -601,6 +607,7 @@ def shutdown_daqd() -> dict[str, str]:
 def _get_run_log_rows(
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    view: str = Query(default="all"),
 ) -> dict[str, Any]:
     table = (
         os.getenv("SIMPLEDAQ_MYSQL_TABLE")
@@ -612,15 +619,69 @@ def _get_run_log_rows(
     if err_text:
         raise HTTPException(status_code=500, detail={"error": err_text})
 
+    mode = str(view or "all").strip().lower()
+    if mode not in {"all", "summary"}:
+        raise HTTPException(status_code=400, detail={"error": "view must be 'all' or 'summary'"})
+
     if use_short:
+        run_col = "run"
+        subrun_col = "subrun"
+        nevents_col = "nevents"
+    else:
+        run_col = "run_number"
+        subrun_col = "subrun_number"
+        nevents_col = "event_count"
+
+    if mode == "all":
         query = (
-            f"SELECT run, subrun, nevents, start_time, end_time, status, comment "
-            f"FROM `{table}` ORDER BY run DESC, subrun DESC LIMIT {int(limit)} OFFSET {int(offset)}"
+            f"SELECT {run_col}, {subrun_col}, {nevents_col}, start_time, end_time, status, comment "
+            f"FROM `{table}` ORDER BY {run_col} DESC, {subrun_col} DESC LIMIT {int(limit)} OFFSET {int(offset)}"
         )
     else:
         query = (
-            f"SELECT run_number, subrun_number, event_count, start_time, end_time, status, comment "
-            f"FROM `{table}` ORDER BY run_number DESC, subrun_number DESC LIMIT {int(limit)} OFFSET {int(offset)}"
+            "SELECT agg.run_val, agg.subrun_count, agg.nevents_total, agg.start_time, agg.end_time, "
+            "CASE "
+            "  WHEN ("
+            "         tail.status = 'completed' "
+            "         OR ("
+            "              tail.status = 'stopped' "
+            "              AND agg.stopped_count = 1 "
+            "              AND agg.error_count = 0 "
+            "              AND agg.unknown_count = 0 "
+            "            )"
+            "       ) AND agg.paused_count > 0 "
+            "  THEN CONCAT('completed (paused ', agg.paused_count, ' times)') "
+            "  WHEN ("
+            "         tail.status = 'completed' "
+            "         OR ("
+            "              tail.status = 'stopped' "
+            "              AND agg.stopped_count = 1 "
+            "              AND agg.error_count = 0 "
+            "              AND agg.unknown_count = 0 "
+            "            )"
+            "       ) "
+            "  THEN 'completed' "
+            "  ELSE tail.status "
+            "END AS status, "
+            "tail.comment "
+            "FROM ("
+            f"  SELECT {run_col} AS run_val, "
+            f"         COUNT(*) AS subrun_count, "
+            f"         SUM({nevents_col}) AS nevents_total, "
+            "         MIN(start_time) AS start_time, "
+            "         MAX(end_time) AS end_time, "
+            "         SUM(CASE WHEN status = 'paused' THEN 1 ELSE 0 END) AS paused_count, "
+            "         SUM(CASE WHEN status = 'stopped' THEN 1 ELSE 0 END) AS stopped_count, "
+            "         SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_count, "
+            "         SUM(CASE WHEN status NOT IN ('completed','paused','stopped','error') THEN 1 ELSE 0 END) AS unknown_count, "
+            f"         MAX({subrun_col}) AS last_subrun "
+            f"  FROM `{table}` "
+            f"  GROUP BY {run_col}"
+            ") agg "
+            f"JOIN `{table}` tail "
+            f"  ON tail.{run_col} = agg.run_val AND tail.{subrun_col} = agg.last_subrun "
+            "ORDER BY agg.run_val DESC "
+            f"LIMIT {int(limit)} OFFSET {int(offset)}"
         )
 
     rc, out, err = _run_mysql_query(query)
@@ -646,20 +707,22 @@ def _get_run_log_rows(
                 }
             )
 
-    return {"rows": rows, "limit": limit, "offset": offset}
+    return {"rows": rows, "limit": limit, "offset": offset, "view": mode}
 
 
 @app.get("/api/run-log")
 def get_run_log(
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    view: str = Query(default="all"),
 ) -> dict[str, Any]:
-    return _get_run_log_rows(limit=limit, offset=offset)
+    return _get_run_log_rows(limit=limit, offset=offset, view=view)
 
 
 @app.get("/api/subruns")
 def get_subruns_compat(
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
+    view: str = Query(default="all"),
 ) -> dict[str, Any]:
-    return _get_run_log_rows(limit=limit, offset=offset)
+    return _get_run_log_rows(limit=limit, offset=offset, view=view)

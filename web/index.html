@@ -27,6 +27,7 @@
 
       <section id="section_main">
         <section class="panel">
+          <h2>DAQ Control</h2>
           <div class="actions">
             <button class="primary" id="btn_start">Start</button>
             <button class="warn" id="btn_pause">Pause</button>
@@ -40,7 +41,7 @@
 
         <section class="panel" style="margin-top:16px;">
           <div class="toolbar">
-            <h2 style="margin:0;">daqd</h2>
+            <h2 style="margin:0;">DAQ Daemon</h2>
             <div class="lamp-wrap">
               <span id="health_lamp" class="lamp"></span>
               <span id="health_text">Unknown</span>
@@ -50,18 +51,11 @@
           <div class="row"><label for="startup_connect_timeout_sec">Startup Connect Timeout [s]</label><input id="startup_connect_timeout_sec" type="number" min="1" value="5" /></div>
           <div class="row"><label for="reconnect_failure_timeout_sec">Reconnect Failure Timeout [s]</label><input id="reconnect_failure_timeout_sec" type="number" min="1" value="10" /></div>
           <div class="actions">
-            <button class="primary" id="btn_start_daqd">Start daqd</button>
-            <button class="danger" id="btn_shutdown">Shutdown daqd</button>
+            <button class="primary" id="btn_start_daqd">Start daemon</button>
+            <button class="danger" id="btn_shutdown">Shutdown daemon</button>
+            <button id="btn_refresh_daqd_log">Refresh log</button>
           </div>      
-          <div class="daqd-log-wrap">
-            <div class="toolbar">
-              <h2 style="margin:0;">daqd log</h2>
-              <div>
-                <button id="btn_refresh_daqd_log">Refresh log</button>
-              </div>
-            </div>
-            <pre id="daqd_log_view" class="daqd-log-view"></pre>
-          </div>
+          <pre id="daqd_log_view" class="daqd-log-view"></pre>
         </section>
 
         <section class="panel" style="margin-top:16px;">
@@ -93,7 +87,7 @@
       <section id="section_runlog" style="margin-top:16px;">
         <section class="panel">
           <div class="toolbar">
-            <h2 style="margin:0;">Run Log</h2>
+            <h2 style="margin:0;">Run Log (Short Version)</h2>
             <button id="btn_refresh_runlog">Refresh Run Log</button>
           </div>
           <div style="overflow:auto;">

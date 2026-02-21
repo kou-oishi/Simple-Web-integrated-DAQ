@@ -28,6 +28,8 @@ Example config (`web/defaults.json`):
   "startup_connect_timeout_sec": 5,
   "reconnect_failure_timeout_sec": 10,
   "comment": "",
+  "main_run_log_limit": 50,
+  "run_log_page_limit": 200,
   "run_log_limit": 50,
   "devices": [
     { "frontend": "kc705_tof", "board_id": 1, "host": "127.0.0.2", "port": 9101 }

@@ -27,6 +27,52 @@ let statusPollInFlight = false;
 let msgSource = '';
 let daqState = '-';
 let runLogLimit = 50;
+const MAIN_FORM_STATE_KEY = 'simpledaq_main_form_state_v1';
+
+function loadMainFormState() {
+  try {
+    const raw = window.localStorage.getItem(MAIN_FORM_STATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
+function saveMainFormState() {
+  try {
+    const eventsPerFileInput = document.getElementById('events_per_file');
+    const startupTimeoutInput = document.getElementById('startup_connect_timeout_sec');
+    const reconnectFailureTimeoutInput = document.getElementById('reconnect_failure_timeout_sec');
+    const commentInput = document.getElementById('comment');
+    const payload = {
+      events_per_file: eventsPerFileInput ? String(eventsPerFileInput.value || '') : '',
+      startup_connect_timeout_sec: startupTimeoutInput ? String(startupTimeoutInput.value || '') : '',
+      reconnect_failure_timeout_sec: reconnectFailureTimeoutInput ? String(reconnectFailureTimeoutInput.value || '') : '',
+      comment: commentInput ? String(commentInput.value || '') : '',
+    };
+    window.localStorage.setItem(MAIN_FORM_STATE_KEY, JSON.stringify(payload));
+  } catch (_) {
+    // ignore storage failures
+  }
+}
+
+function bindMainFormStateSave() {
+  const ids = [
+    'events_per_file',
+    'startup_connect_timeout_sec',
+    'reconnect_failure_timeout_sec',
+    'comment',
+  ];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', saveMainFormState);
+    el.addEventListener('change', saveMainFormState);
+  });
+}
 
 function setActionButtonsByState(state, running) {
   const btnStart = document.getElementById('btn_start');
@@ -208,7 +254,22 @@ async function loadUiConfig() {
   if (uiConfig.comment !== undefined && uiConfig.comment !== null) {
     if (commentInput) commentInput.value = String(uiConfig.comment);
   }
-  runLogLimit = Number(uiConfig.run_log_limit || 50);
+  const saved = loadMainFormState();
+  if (saved) {
+    if (eventsPerFileInput && saved.events_per_file !== undefined) {
+      eventsPerFileInput.value = String(saved.events_per_file);
+    }
+    if (startupTimeoutInput && saved.startup_connect_timeout_sec !== undefined) {
+      startupTimeoutInput.value = String(saved.startup_connect_timeout_sec);
+    }
+    if (reconnectFailureTimeoutInput && saved.reconnect_failure_timeout_sec !== undefined) {
+      reconnectFailureTimeoutInput.value = String(saved.reconnect_failure_timeout_sec);
+    }
+    if (commentInput && saved.comment !== undefined) {
+      commentInput.value = String(saved.comment);
+    }
+  }
+  runLogLimit = Number(uiConfig.main_run_log_limit || 50);
   if (Array.isArray(uiConfig.devices)) {
     deviceEntries = uiConfig.devices.slice();
     renderDeviceTable();
@@ -307,7 +368,7 @@ function buildStartPayload() {
 
 async function refreshRunLog() {
   try {
-    const limit = Number(runLogLimit || uiConfig.run_log_limit || 50);
+    const limit = Number(runLogLimit || uiConfig.main_run_log_limit || 50);
     const data = await callApi(`/api/run-log?limit=${limit}&offset=0`);
     runLogBody.innerHTML = '';
     (data.rows || []).forEach((r) => {
@@ -463,6 +524,7 @@ async function startDaqdFromWeb() {
 
 document.getElementById('btn_start_daqd').addEventListener('click', startDaqdFromWeb);
 document.getElementById('btn_start').addEventListener('click', async () => {
+  saveMainFormState();
   await runCommand('/api/start', 'POST', buildStartPayload());
 });
 document.getElementById('btn_pause').addEventListener('click', async () => {
@@ -491,6 +553,7 @@ document.getElementById('btn_add_device').addEventListener('click', () => {
   }
 });
 frontendSelect.addEventListener('change', renderDeviceFields);
+bindMainFormStateSave();
 
 Promise.all([loadUiConfig(), loadFrontends()])
   .then(async () => {

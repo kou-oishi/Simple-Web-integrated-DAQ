@@ -126,6 +126,13 @@ input, textarea, select {
   background: #fff;
 }
 
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+
 textarea { min-height: 70px; resize: vertical; }
 
 .actions {
@@ -210,7 +217,18 @@ th { color: var(--muted); font-weight: 600; }
 .runlog-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  margin-top: 10px;
+  margin-bottom: 10px;
+}
+
+.runlog-view-mode {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
 }
 
 .runlog-toolbar label {
@@ -218,13 +236,41 @@ th { color: var(--muted); font-weight: 600; }
   font-size: 12px;
 }
 
-.runlog-toolbar input {
+.runlog-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.runlog-filter-item label {
+  white-space: nowrap;
+}
+
+.runlog-toolbar input:not([type="checkbox"]):not([type="radio"]),
+.runlog-toolbar select {
   width: 110px;
 }
 
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.radio-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .runlog-table-wrap {
-  max-height: calc(100vh - 170px);
-  overflow: auto;
+  overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
 }
@@ -250,14 +296,6 @@ th { color: var(--muted); font-weight: 600; }
   margin: 0 0 8px;
   font-size: 14px;
   color: var(--muted);
-}
-
-.daqd-log-wrap {
-  margin-top: 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 10px;
-  background: #fbfcfd;
 }
 
 .daqd-log-view {

@@ -26,13 +26,27 @@
       <div id="global_status_mount"></div>
 
       <section class="panel">
-        <div class="toolbar">
-          <h2 style="margin:0;">Run Log</h2>
-          <div class="runlog-toolbar">
+        <h2 style="margin:0;">Run Log</h2>
+        <div class="runlog-view-mode">
+          <label class="radio-inline">
+            <input id="view_all" type="radio" name="runlog_view" value="all" checked />
+            All
+          </label>
+          <label class="radio-inline">
+            <input id="view_summary" type="radio" name="runlog_view" value="summary" />
+            Run summary
+          </label>
+        </div>
+        <div class="runlog-toolbar">
+          <div class="runlog-filter-item">
             <label for="runlog_limit">Rows</label>
             <input id="runlog_limit" type="number" min="1" max="1000" value="200" />
+          </div>
+          <div class="runlog-filter-item">
             <label for="runlog_offset">Offset</label>
             <input id="runlog_offset" type="number" min="0" value="0" />
+          </div>
+          <div class="runlog-filter-item">
             <label for="runlog_status">Status</label>
             <select id="runlog_status">
               <option value="">All</option>
@@ -41,22 +55,26 @@
               <option value="paused">paused</option>
               <option value="error">error</option>
             </select>
+          </div>
+          <div class="runlog-filter-item">
             <label for="runlog_run">Run</label>
             <input id="runlog_run" type="number" min="0" placeholder="any" />
+          </div>
+          <div class="runlog-filter-item">
             <label for="runlog_subrun">Subrun</label>
             <input id="runlog_subrun" type="number" min="0" placeholder="any" />
-            <label class="checkbox-inline">
-              <input id="runlog_auto" type="checkbox" />
-              Auto
-            </label>
-            <button id="btn_refresh_runlog">Refresh</button>
           </div>
+          <label class="checkbox-inline">
+            <input id="runlog_auto" type="checkbox" />
+            Auto refresh
+          </label>
+          <button id="btn_refresh_runlog">Refresh</button>
         </div>
         <div class="runlog-table-wrap">
           <table>
             <thead>
               <tr>
-                <th>run</th><th>subrun</th><th>nevents</th><th>start_time</th><th>end_time</th><th>status</th><th>comment</th>
+                <th>run</th><th id="th_subrun">subrun</th><th>nevents</th><th>start_time</th><th>end_time</th><th>status</th><th>comment</th>
               </tr>
             </thead>
             <tbody id="runlog_tbody"></tbody>
