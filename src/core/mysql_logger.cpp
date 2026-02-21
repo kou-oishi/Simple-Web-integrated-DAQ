@@ -25,13 +25,13 @@ std::string quote_status(const std::string& status) {
 
 bool MySqlLogger::IsEnabled() const { return daq_defaults::kMySqlEnabled; }
 
-bool MySqlLogger::InsertSubrun(const SubrunLogEntry& entry, std::string& error_text) const {
+bool MySqlLogger::InsertRunLog(const RunLogEntry& entry, std::string& error_text) const {
   if (!IsEnabled()) {
     return true;
   }
 
   std::ostringstream sql;
-  sql << "INSERT INTO `" << daq_defaults::kMySqlSubrunLogTable << "` "
+  sql << "INSERT INTO `" << daq_defaults::kMySqlRunLogTable << "` "
       << "(run, subrun, nevents, start_time, end_time, status, comment) VALUES ("
       << static_cast<unsigned long long>(entry.run_number) << ", "
       << static_cast<unsigned long long>(entry.subrun_number) << ", "
@@ -44,7 +44,7 @@ bool MySqlLogger::InsertSubrun(const SubrunLogEntry& entry, std::string& error_t
   return ExecuteQuery(sql.str(), error_text);
 }
 
-bool MySqlLogger::UpdateSubrunStatus(uint32_t run_number,
+bool MySqlLogger::UpdateRunLogStatus(uint32_t run_number,
                                      uint32_t subrun_number,
                                      const std::string& status,
                                      std::string& error_text) const {
@@ -54,7 +54,7 @@ bool MySqlLogger::UpdateSubrunStatus(uint32_t run_number,
   }
 
   std::ostringstream sql;
-  sql << "UPDATE `" << daq_defaults::kMySqlSubrunLogTable << "` "
+  sql << "UPDATE `" << daq_defaults::kMySqlRunLogTable << "` "
       << "SET status='" << EscapeSql(quote_status(status)) << "' "
       << "WHERE run=" << static_cast<unsigned long long>(run_number)
       << " AND subrun=" << static_cast<unsigned long long>(subrun_number);
@@ -98,7 +98,7 @@ bool MySqlLogger::ResolveRunNumber(bool run_number_specified,
 
 bool MySqlLogger::GetLastRunNumber(uint32_t& out_last_run_number, bool& out_has_rows, std::string& error_text) const {
   std::string cell;
-  if (!QueryFirstCell("SELECT MAX(run) FROM `" + std::string(daq_defaults::kMySqlSubrunLogTable) + "`",
+  if (!QueryFirstCell("SELECT MAX(run) FROM `" + std::string(daq_defaults::kMySqlRunLogTable) + "`",
                       cell,
                       error_text)) {
     return false;
@@ -130,7 +130,7 @@ bool MySqlLogger::GetLastRunNumber(uint32_t& out_last_run_number, bool& out_has_
 
 bool MySqlLogger::RunNumberExists(uint32_t run_number, bool& out_exists, std::string& error_text) const {
   std::string cell;
-  if (!QueryFirstCell("SELECT 1 FROM `" + std::string(daq_defaults::kMySqlSubrunLogTable) +
+  if (!QueryFirstCell("SELECT 1 FROM `" + std::string(daq_defaults::kMySqlRunLogTable) +
                           "` WHERE run=" + std::to_string(run_number) + " LIMIT 1",
                       cell,
                       error_text)) {

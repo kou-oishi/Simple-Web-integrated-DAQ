@@ -5,6 +5,7 @@
 class Kc705TofFrontend : public IDeviceFrontend {
  public:
   const char* Id() const override { return "kc705_tof"; }
+  DeviceFrontendSchema DescribeDeviceSpec() const override;
 
   bool ParseDeviceSpec(const std::string& spec_after_equals,
                          DeviceSpec& out_device,

@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string>
 
-struct SubrunLogEntry {
+struct RunLogEntry {
   uint32_t run_number = 0;
   uint32_t subrun_number = 0;
   uint64_t event_count = 0;
@@ -17,8 +17,8 @@ struct SubrunLogEntry {
 class MySqlLogger {
  public:
   bool IsEnabled() const;
-  bool InsertSubrun(const SubrunLogEntry& entry, std::string& error_text) const;
-  bool UpdateSubrunStatus(uint32_t run_number, uint32_t subrun_number, const std::string& status, std::string& error_text) const;
+  bool InsertRunLog(const RunLogEntry& entry, std::string& error_text) const;
+  bool UpdateRunLogStatus(uint32_t run_number, uint32_t subrun_number, const std::string& status, std::string& error_text) const;
   bool ResolveRunNumber(bool run_number_specified,
                         uint32_t requested_run_number,
                         uint32_t& out_run_number,

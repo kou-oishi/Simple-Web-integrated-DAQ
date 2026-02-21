@@ -23,6 +23,7 @@ void print_usage(const char* prog) {
   std::cerr << "  resume\n";
   std::cerr << "  stop\n";
   std::cerr << "  shutdown\n";
+  std::cerr << "  frontends\n";
   std::cerr << "Default control endpoint: " << daq_defaults::kControlEndpoint << "\n";
 }
 
@@ -110,7 +111,7 @@ int main(int argc, char** argv) {
   const std::string cmd = to_lower(argv[optind]);
 
   std::string req;
-  if (cmd == "status" || cmd == "pause" || cmd == "resume" || cmd == "stop" || cmd == "shutdown") {
+  if (cmd == "status" || cmd == "pause" || cmd == "resume" || cmd == "stop" || cmd == "shutdown" || cmd == "frontends") {
     req = cmd;
   } else if (cmd == "start") {
     if (optind + 1 < argc) {

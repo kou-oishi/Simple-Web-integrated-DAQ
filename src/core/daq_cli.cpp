@@ -43,16 +43,19 @@ void PrintDaqUsage(const char* prog) {
   std::cerr << "Usage: " << prog
             << " --output-dir <dir> --device <frontend>=<spec> [--device <...>]"
             << " [--Run-start <>=0>] [--events-per-file <>=1>]"
-            << " [--reconnect-ms <>=1>] [--read-timeout-ms <>=1>] [--duration-sec <>=1>]\n";
+            << " [--reconnect-ms <>=1>] [--read-timeout-ms <>=1>] [--duration-sec <>=1>]"
+            << " [--startup-connect-timeout-sec <>=1>] [--reconnect-failure-timeout-sec <>=1>]\n";
   std::cerr << "Options:\n";
   std::cerr << "  -o, --output-dir <dir>         Output directory for Run files (required)\n";
   std::cerr << "  -d, --device <frontend>=<spec> Input device spec; repeatable\n";
   std::cerr << "  -r, --Run-start <n>            Starting Run number (>= 0)\n";
   std::cerr << "  -e, --events-per-file <n>      Events per file (>= 1)\n";
-  std::cerr << "  -m, --comment <text>           Run comment recorded in subrun MySQL log\n";
+  std::cerr << "  -m, --comment <text>           Run comment recorded in MySQL run log\n";
   std::cerr << "  -c, --reconnect-ms <ms>        Reconnect interval in milliseconds (>= 1)\n";
   std::cerr << "  -t, --read-timeout-ms <ms>     Read timeout in milliseconds (>= 1)\n";
   std::cerr << "  -u, --duration-sec <sec>       Run duration in seconds (>= 1, 0 means unlimited)\n";
+  std::cerr << "  -x, --startup-connect-timeout-sec <sec>  Startup connect timeout in seconds (>= 1)\n";
+  std::cerr << "  -f, --reconnect-failure-timeout-sec <sec> Reconnect-failure timeout in seconds (>= 1)\n";
   std::cerr << "  -h, --help                     Show this help\n";
   std::cerr << "Available frontends: " << supported_frontends_text() << "\n";
   std::cerr << "Example: --device kc705_tof=1@127.0.0.2:9101\n";
@@ -68,6 +71,8 @@ bool ParseDaqArgs(int argc, char** argv, DaqConfig& cfg) {
       {"reconnect-ms", required_argument, nullptr, 'c'},
       {"read-timeout-ms", required_argument, nullptr, 't'},
       {"duration-sec", required_argument, nullptr, 'u'},
+      {"startup-connect-timeout-sec", required_argument, nullptr, 'x'},
+      {"reconnect-failure-timeout-sec", required_argument, nullptr, 'f'},
       {"help", no_argument, nullptr, 'h'},
       {nullptr, 0, nullptr, 0},
   };
@@ -75,7 +80,7 @@ bool ParseDaqArgs(int argc, char** argv, DaqConfig& cfg) {
   optind = 1;
   opterr = 0;
   while (true) {
-    const int c = ::getopt_long(argc, argv, ":o:d:r:e:m:c:t:u:h", kLongOpts, nullptr);
+    const int c = ::getopt_long(argc, argv, ":o:d:r:e:m:c:t:u:x:f:h", kLongOpts, nullptr);
     if (c == -1) {
       break;
     }
@@ -155,6 +160,24 @@ bool ParseDaqArgs(int argc, char** argv, DaqConfig& cfg) {
           return false;
         }
         cfg.duration_sec = tmp;
+        break;
+      }
+      case 'x': {
+        uint32_t tmp = 0;
+        if (!parse_u32(optarg, tmp) || tmp == 0) {
+          std::cerr << "Invalid --startup-connect-timeout-sec: " << optarg << " (expected >=1)\n";
+          return false;
+        }
+        cfg.startup_connect_timeout_sec = tmp;
+        break;
+      }
+      case 'f': {
+        uint32_t tmp = 0;
+        if (!parse_u32(optarg, tmp) || tmp == 0) {
+          std::cerr << "Invalid --reconnect-failure-timeout-sec: " << optarg << " (expected >=1)\n";
+          return false;
+        }
+        cfg.reconnect_failure_timeout_sec = tmp;
         break;
       }
       case 'h':

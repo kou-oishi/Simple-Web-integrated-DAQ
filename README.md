@@ -7,9 +7,9 @@ cmake -S . -B build
 cmake --build build -j
 ```
 
-## MySQL Subrun Log
+## MySQL Run Log
 
-DAQ writes one MySQL entry per subrun with:
+DAQ writes one MySQL entry per file segment (run/subrun) with:
 - run/subrun number
 - event count
 - start/end time
@@ -22,6 +22,18 @@ Initialise the table:
 
 ```bash
 mysql -u <user> -p < scripts/init_mysql_log.sql
+```
+
+## Web Backend
+
+Python FastAPI backend is available in `web/`.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r web/requirements.txt
+uvicorn web.app:app --host 0.0.0.0 --port 8080
+python3 -m web.server --host 0.0.0.0 --port 8080 --config web/defaults.json
 ```
 
 ## TCP dummy device
@@ -189,6 +201,8 @@ Control API contract (for CLI or Web server adapters):
 - Request strings:
 `status`
 `start <daq args>`
+`pause`
+`resume`
 `stop`
 `shutdown`
 - Response strings:

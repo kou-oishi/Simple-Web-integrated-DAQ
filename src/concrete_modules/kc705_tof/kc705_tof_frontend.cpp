@@ -26,6 +26,43 @@ bool parse_u32(const std::string& s, uint32_t& out) {
 
 }  // namespace
 
+DeviceFrontendSchema Kc705TofFrontend::DescribeDeviceSpec() const {
+  DeviceFrontendSchema schema;
+  schema.spec_format = "<board_id@host:port>";
+  schema.spec_template = "{board_id}@{host}:{port}";
+
+  DeviceFrontendFieldSchema board_id;
+  board_id.name = "board_id";
+  board_id.type = DeviceFrontendFieldType::kInteger;
+  board_id.required = true;
+  board_id.has_min = true;
+  board_id.min_value = 0;
+  board_id.has_max = true;
+  board_id.max_value = 7;
+  board_id.description = "KC705 board ID";
+  schema.fields.push_back(board_id);
+
+  DeviceFrontendFieldSchema host;
+  host.name = "host";
+  host.type = DeviceFrontendFieldType::kIpv4;
+  host.required = true;
+  host.description = "Device IPv4 address";
+  schema.fields.push_back(host);
+
+  DeviceFrontendFieldSchema port;
+  port.name = "port";
+  port.type = DeviceFrontendFieldType::kInteger;
+  port.required = true;
+  port.has_min = true;
+  port.min_value = 1;
+  port.has_max = true;
+  port.max_value = 65535;
+  port.description = "TCP port";
+  schema.fields.push_back(port);
+
+  return schema;
+}
+
 bool Kc705TofFrontend::ParseDeviceSpec(const std::string& spec_after_equals,
                                          DeviceSpec& out_device,
                                          std::string& error_message) const {
