@@ -4,6 +4,8 @@
 
 namespace {
 
+constexpr double kTofScale = 1.0e-6;
+
 uint64_t read_be_u64(const uint8_t* p) {
   uint64_t word = 0;
   for (size_t i = 0; i < 8; ++i) {
@@ -12,9 +14,7 @@ uint64_t read_be_u64(const uint8_t* p) {
   return word;
 }
 
-}  // namespace
-
-bool DecodedMessageToKc705TofEvent(const DecodedMessage& message, Kc705TofEvent& out_event, std::string& error_text) {
+bool message_to_event(const DecodedMessage& message, Kc705TofEvent& out_event, std::string& error_text) {
   const auto* event = std::any_cast<Kc705TofEvent>(&message.payload);
   if (event == nullptr) {
     error_text = "kc705_tof decoder received unsupported decoded payload type";
@@ -23,6 +23,8 @@ bool DecodedMessageToKc705TofEvent(const DecodedMessage& message, Kc705TofEvent&
   out_event = *event;
   return true;
 }
+
+}  // namespace
 
 bool Kc705TofDecoder::frame_to_event(const std::vector<uint8_t>& frame,
                                      Kc705TofEvent& out_event,
@@ -38,7 +40,8 @@ bool Kc705TofDecoder::frame_to_event(const std::vector<uint8_t>& frame,
   out_event.raw_word = word;
   out_event.board_id = static_cast<uint8_t>((word >> 61U) & 0x7U);
   out_event.channel_id = static_cast<uint8_t>((word >> 56U) & 0x1FU);
-  out_event.value56 = word & 0x00FFFFFFFFFFFFFFULL;
+  const uint64_t raw_tof = word & 0x00FFFFFFFFFFFFFFULL;
+  out_event.tof = static_cast<double>(raw_tof) * kTofScale;
   return true;
 }
 
@@ -49,41 +52,48 @@ bool Kc705TofDecoder::decode_frame(const std::vector<uint8_t>& frame,
   if (!frame_to_event(frame, event, error_text)) {
     return false;
   }
+  event.run_number = out_message.run_number;
+  event.event_number = out_message.event_number;
 
   out_message.payload = event;
   return true;
 }
 
-std::vector<std::string> Kc705TofDecoder::tree_branch_names() const {
-  return {"raw_word", "board_id", "channel_id", "value56"};
+std::vector<TreeBranchDef> Kc705TofDecoder::tree_branches() const {
+  return {
+      {"raw_word", TreeValueType::kU64},
+      {"board_id", TreeValueType::kU64},
+      {"channel_id", TreeValueType::kU64},
+      {"tof", TreeValueType::kF64},
+  };
 }
 
 bool Kc705TofDecoder::decoded_to_tree_values(const DecodedMessage& message,
-                                             std::vector<uint64_t>& out_values,
+                                             std::vector<TreeValue>& out_values,
                                              std::string& error_text) const {
   Kc705TofEvent event;
-  if (!DecodedMessageToKc705TofEvent(message, event, error_text)) {
+  if (!message_to_event(message, event, error_text)) {
     return false;
   }
 
   out_values.clear();
   out_values.reserve(4);
-  out_values.push_back(event.raw_word);
-  out_values.push_back(static_cast<uint64_t>(event.board_id));
-  out_values.push_back(static_cast<uint64_t>(event.channel_id));
-  out_values.push_back(event.value56);
+  out_values.push_back(TreeValue::FromU64(event.raw_word));
+  out_values.push_back(TreeValue::FromU64(static_cast<uint64_t>(event.board_id)));
+  out_values.push_back(TreeValue::FromU64(static_cast<uint64_t>(event.channel_id)));
+  out_values.push_back(TreeValue::FromF64(static_cast<double>(event.tof)));
   return true;
 }
 
 bool Kc705TofDecoder::format_decoded(const DecodedMessage& message, std::string& out_text, std::string& error_text) const {
   Kc705TofEvent event;
-  if (!DecodedMessageToKc705TofEvent(message, event, error_text)) {
+  if (!message_to_event(message, event, error_text)) {
     return false;
   }
 
   std::ostringstream oss;
   oss << "board=" << static_cast<unsigned>(event.board_id) << " ch=" << static_cast<unsigned>(event.channel_id)
-      << " value=" << event.value56;
+      << " tof=" << event.tof;
   out_text = oss.str();
   return true;
 }
@@ -109,3 +119,5 @@ const IMonitorDecoderFactory& GetKc705TofDecoderFactory() {
   static Kc705TofDecoderFactory factory;
   return factory;
 }
+
+REGISTER_DECODER(GetKc705TofDecoderFactory);

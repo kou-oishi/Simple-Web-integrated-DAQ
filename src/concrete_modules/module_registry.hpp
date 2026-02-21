@@ -7,6 +7,7 @@
 
 #include "core/device_frontend.hpp"
 #include "monitor/decoder.hpp"
+#include "monitor/realtime_analysis.hpp"
 
 class IMonitorDecoderFactory {
  public:
@@ -19,16 +20,37 @@ class IMonitorDecoderFactory {
                       std::string& error_text) const = 0;
 };
 
-struct ConcreteModuleRegistration {
-  const char* id = nullptr;
-  const IDeviceFrontend* frontend = nullptr;
-  const IMonitorDecoderFactory* decoder_factory = nullptr;
-};
-
-const std::vector<ConcreteModuleRegistration>& GetConcreteModuleRegistry();
+bool RegisterDeviceFrontend(std::unique_ptr<IDeviceFrontend> frontend);
+bool RegisterMonitorDecoderFactory(const IMonitorDecoderFactory* factory);
+bool RegisterRealtimeAnalysisFactory(const IMonitorRealtimeAnalysisFactory* factory);
 
 const IDeviceFrontend* FindDeviceFrontend(const std::string& frontend_id);
 std::vector<std::string> ListDeviceFrontendIds();
 
 const IMonitorDecoderFactory* FindMonitorDecoderFactory(const std::string& name);
 std::vector<std::string> ListMonitorDecoderFactories();
+
+const IMonitorRealtimeAnalysisFactory* FindRealtimeAnalysisFactory(const std::string& name);
+std::vector<std::string> ListRealtimeAnalysisFactories();
+
+#define SIMPLEDAQ_CONCAT_IMPL_(a, b) a##b
+#define SIMPLEDAQ_CONCAT_(a, b) SIMPLEDAQ_CONCAT_IMPL_(a, b)
+
+#define REGISTER_FRONTEND(FRONTEND_TYPE)                                                                  \
+  namespace {                                                                                              \
+  const bool SIMPLEDAQ_CONCAT_(kRegisterFrontend_, __COUNTER__) =                                         \
+      RegisterDeviceFrontend(std::make_unique<FRONTEND_TYPE>());                                          \
+  }
+
+#define REGISTER_DECODER(FACTORY_GETTER_FN)                                                                \
+  namespace {                                                                                               \
+  const bool SIMPLEDAQ_CONCAT_(kRegisterDecoder_, __COUNTER__) =                                           \
+      RegisterMonitorDecoderFactory(&(FACTORY_GETTER_FN()));                                                \
+  }
+
+#define REGISTER_ANALYSIS(FACTORY_GETTER_FN)                                                               \
+  namespace {                                                                                              \
+  const bool SIMPLEDAQ_CONCAT_(kRegisterAnalysis_, __COUNTER__) =                                         \
+      RegisterRealtimeAnalysisFactory(&(FACTORY_GETTER_FN()));                                            \
+  }
+

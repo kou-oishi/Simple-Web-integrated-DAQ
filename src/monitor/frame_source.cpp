@@ -1,6 +1,7 @@
 #include "monitor/frame_source.hpp"
 
 #include <chrono>
+#include <cctype>
 #include <filesystem>
 #include <iomanip>
 #include <sstream>
@@ -11,10 +12,27 @@
 FileFrameSource::FileFrameSource(std::string path, std::size_t frame_size)
     : path_(std::move(path)), frame_size_(frame_size) {}
 
-SourceStatus FileFrameSource::next_frame(std::vector<uint8_t>& out_frame,
+uint32_t FileFrameSource::detect_run_number_from_path() const {
+  const std::string filename = std::filesystem::path(path_).filename().string();
+  const std::size_t run_pos = filename.find("run");
+  if (run_pos == std::string::npos) {
+    return 0;
+  }
+  std::size_t pos = run_pos + 3;
+  uint32_t value = 0;
+  bool saw_digit = false;
+  while (pos < filename.size() && std::isdigit(static_cast<unsigned char>(filename[pos])) != 0) {
+    saw_digit = true;
+    value = static_cast<uint32_t>(value * 10U + static_cast<uint32_t>(filename[pos] - '0'));
+    ++pos;
+  }
+  return saw_digit ? value : 0;
+}
+
+SourceStatus FileFrameSource::next_frame(FrameEnvelope& out_frame,
                                          std::string& error_text,
                                          const volatile std::sig_atomic_t* stop_requested) {
-  out_frame.clear();
+  out_frame.payload.clear();
   error_text.clear();
   if (stop_requested != nullptr && *stop_requested != 0) {
     return SourceStatus::kEof;
@@ -31,6 +49,8 @@ SourceStatus FileFrameSource::next_frame(std::vector<uint8_t>& out_frame,
       error_text = "failed to open input file: " + path_;
       return SourceStatus::kError;
     }
+    run_number_ = detect_run_number_from_path();
+    next_event_number_ = 0;
     opened_ = true;
   }
 
@@ -38,20 +58,23 @@ SourceStatus FileFrameSource::next_frame(std::vector<uint8_t>& out_frame,
     return SourceStatus::kEof;
   }
 
-  out_frame.resize(frame_size_);
-  ifs_.read(reinterpret_cast<char*>(out_frame.data()), static_cast<std::streamsize>(frame_size_));
+  out_frame.payload.resize(frame_size_);
+  ifs_.read(reinterpret_cast<char*>(out_frame.payload.data()), static_cast<std::streamsize>(frame_size_));
 
   const std::streamsize n = ifs_.gcount();
   if (n == 0) {
     eof_ = true;
-    out_frame.clear();
+    out_frame.payload.clear();
     return SourceStatus::kEof;
   }
   if (n != static_cast<std::streamsize>(frame_size_)) {
     error_text = "truncated frame at end of file";
-    out_frame.clear();
+    out_frame.payload.clear();
     return SourceStatus::kError;
   }
+
+  out_frame.run_number = run_number_;
+  out_frame.event_number = next_event_number_++;
 
   return SourceStatus::kOk;
 }
@@ -93,6 +116,8 @@ bool LiveRunFileSource::open_current_file(std::string& error_text) {
     return false;
   }
 
+  next_event_number_ = 0;
+
   return true;
 }
 
@@ -112,10 +137,10 @@ bool LiveRunFileSource::try_advance_next_run(std::string& error_text) {
   return open_current_file(error_text);
 }
 
-SourceStatus LiveRunFileSource::next_frame(std::vector<uint8_t>& out_frame,
+SourceStatus LiveRunFileSource::next_frame(FrameEnvelope& out_frame,
                                            std::string& error_text,
                                            const volatile std::sig_atomic_t* stop_requested) {
-  out_frame.clear();
+  out_frame.payload.clear();
   error_text.clear();
   if (stop_requested != nullptr && *stop_requested != 0) {
     return SourceStatus::kEof;
@@ -147,15 +172,17 @@ SourceStatus LiveRunFileSource::next_frame(std::vector<uint8_t>& out_frame,
       continue;
     }
 
-    out_frame.resize(frame_size_);
-    ifs_->read(reinterpret_cast<char*>(out_frame.data()), static_cast<std::streamsize>(frame_size_));
+    out_frame.payload.resize(frame_size_);
+    ifs_->read(reinterpret_cast<char*>(out_frame.payload.data()), static_cast<std::streamsize>(frame_size_));
     const std::streamsize n = ifs_->gcount();
     if (n == static_cast<std::streamsize>(frame_size_)) {
+      out_frame.run_number = current_run_;
+      out_frame.event_number = next_event_number_++;
       return SourceStatus::kOk;
     }
 
     ifs_->clear();
-    out_frame.clear();
+    out_frame.payload.clear();
 
     if (n > 0) {
       ifs_->seekg(-n, std::ios::cur);

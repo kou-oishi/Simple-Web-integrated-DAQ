@@ -164,6 +164,9 @@ bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue, const F
     }
 
     if (!rec.payload.empty()) {
+      rec.run_number = run_number;
+      rec.event_number = static_cast<uint64_t>(events_in_current_file);
+
       if (on_frame_ready) {
         on_frame_ready(rec);
       }

@@ -7,12 +7,13 @@
 #include <string>
 #include <vector>
 
+#include "concrete_modules/module_registry.hpp"
 #include "core/defaults.hpp"
 #include "monitor/decoder.hpp"
-#include "concrete_modules/module_registry.hpp"
 #include "monitor/frame_source.hpp"
 #include "monitor/pipeline.hpp"
 #include "monitor/sink.hpp"
+#include "monitor/sink_realtime.hpp"
 #include "monitor/zmq_frame_source.hpp"
 #if defined(SIMPLEDAQ_HAS_ROOT) && SIMPLEDAQ_HAS_ROOT
 #include "monitor/sink_root.hpp"
@@ -38,6 +39,7 @@ struct Options {
   std::string text_output;
   bool no_console = false;
   std::string root_out;
+  std::vector<std::string> analyses;
 };
 
 void print_usage(const char* prog) {
@@ -58,6 +60,7 @@ void print_usage(const char* prog) {
   std::cerr << "  -o, --text-output <path|->    Text output destination ('-' means stdout)\n";
   std::cerr << "  -n, --no-console              Disable default console sink\n";
   std::cerr << "  -O, --root-out <file.root>    Write decoded events to ROOT TTree output\n";
+  std::cerr << "  -a, --analysis <name[=spec]>  Enable realtime analysis module (repeatable)\n";
   std::cerr << "  -h, --help                    Show this help\n";
 }
 
@@ -98,6 +101,7 @@ bool parse_args(int argc, char** argv, Options& options) {
       {"text-output", required_argument, nullptr, 'o'},
       {"no-console", no_argument, nullptr, 'n'},
       {"root-out", required_argument, nullptr, 'O'},
+      {"analysis", required_argument, nullptr, 'a'},
       {"help", no_argument, nullptr, 'h'},
       {nullptr, 0, nullptr, 0},
   };
@@ -105,7 +109,7 @@ bool parse_args(int argc, char** argv, Options& options) {
   optind = 1;
   opterr = 0;
   while (true) {
-    const int c = ::getopt_long(argc, argv, ":l:e:d:m:p:r:q:i:to:nO:h", kLongOpts, nullptr);
+    const int c = ::getopt_long(argc, argv, ":l:e:d:m:p:r:q:i:to:nO:a:h", kLongOpts, nullptr);
     if (c == -1) {
       break;
     }
@@ -161,6 +165,9 @@ bool parse_args(int argc, char** argv, Options& options) {
       case 'O':
         options.root_out = optarg;
         break;
+      case 'a':
+        options.analyses.emplace_back(optarg);
+        break;
       case 'h':
         print_usage(argv[0]);
         std::exit(0);
@@ -199,11 +206,10 @@ bool parse_args(int argc, char** argv, Options& options) {
     options.data_endpoint = daq_defaults::kDataEndpoint;
   }
 
-  if (!options.input_file.empty() && options.root_out.empty() && options.no_console) {
-    if (!options.text_stream) {
-      std::cerr << "When --no-console is set, specify --root-out and/or --text-stream\n";
-      return false;
-    }
+  if (!options.input_file.empty() && options.root_out.empty() && options.no_console && !options.text_stream &&
+      options.analyses.empty()) {
+    std::cerr << "When --no-console is set, specify --root-out, --text-stream, and/or --analysis\n";
+    return false;
   }
 
   if (!options.text_output.empty() && !options.text_stream) {
@@ -286,8 +292,68 @@ int main(int argc, char** argv) {
 #endif
   }
 
+  if (!options.analyses.empty()) {
+#if defined(SIMPLEDAQ_HAS_ROOT) && SIMPLEDAQ_HAS_ROOT
+    std::vector<std::unique_ptr<IRealtimeAnalysis>> analyses;
+    analyses.reserve(options.analyses.size());
+    for (const auto& analysis_arg : options.analyses) {
+      std::string analysis_name;
+      std::string analysis_spec;
+      split_decoder_arg(analysis_arg, analysis_name, analysis_spec);
+      if (analysis_name.empty()) {
+        std::cerr << "Analysis name is empty\n";
+        return 1;
+      }
+
+      const IMonitorRealtimeAnalysisFactory* factory = FindRealtimeAnalysisFactory(analysis_name);
+      if (factory == nullptr) {
+        std::cerr << "Unsupported analysis: " << analysis_name << "\n";
+        std::cerr << "Available analyses:";
+        const auto available = ListRealtimeAnalysisFactories();
+        if (available.empty()) {
+          std::cerr << " (none)";
+        } else {
+          for (const auto& n : available) {
+            std::cerr << " " << n;
+          }
+        }
+        std::cerr << "\n";
+        return 1;
+      }
+
+      const std::string expected_decoder = factory->expected_decoder() == nullptr ? "" : factory->expected_decoder();
+      if (!expected_decoder.empty() && expected_decoder != decoder_name) {
+        std::cerr << "Analysis '" << analysis_name << "' requires decoder '" << expected_decoder
+                  << "', but selected decoder is '" << decoder_name << "'\n";
+        return 1;
+      }
+
+      ParsedAnalysisSpec parsed_spec;
+      if (!parsed_spec.parse(analysis_spec, error_text)) {
+        std::cerr << "Invalid spec for analysis '" << analysis_name << "': " << error_text << "\n";
+        return 1;
+      }
+
+      std::unique_ptr<IRealtimeAnalysis> analysis;
+      if (!factory->create(parsed_spec, analysis, error_text)) {
+        std::cerr << "Failed to create analysis '" << analysis_name << "': " << error_text << "\n";
+        return 1;
+      }
+      if (!analysis) {
+        std::cerr << "Analysis factory returned null analysis: " << analysis_name << "\n";
+        return 1;
+      }
+      analyses.push_back(std::move(analysis));
+    }
+    sinks.push_back(std::make_unique<RealtimeAnalysisSink>(std::move(analyses)));
+#else
+    std::cerr << "This build does not support realtime analysis. Rebuild with ROOT installed.\n";
+    return 1;
+#endif
+  }
+
   if (sinks.empty()) {
-    std::cerr << "No output sink selected. Enable console output or set --root-out.\n";
+    std::cerr << "No output sink selected. Enable console output, --root-out, --text-stream, or --analysis.\n";
     return 1;
   }
 

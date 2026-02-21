@@ -31,7 +31,7 @@ bool MonitorPipeline::run(uint64_t max_events,
       break;
     }
 
-    std::vector<uint8_t> frame;
+    FrameEnvelope frame;
     const SourceStatus st = source_->next_frame(frame, error_text, stop_requested);
     if (st == SourceStatus::kEof) {
       break;
@@ -42,8 +42,9 @@ bool MonitorPipeline::run(uint64_t max_events,
     }
 
     DecodedMessage message;
-    message.event_index = idx;
-    if (!decoder_->decode_frame(frame, message, error_text)) {
+    message.run_number = frame.run_number;
+    message.event_number = frame.event_number;
+    if (!decoder_->decode_frame(frame.payload, message, error_text)) {
       (void)finalize_sinks(error_text);
       return false;
     }

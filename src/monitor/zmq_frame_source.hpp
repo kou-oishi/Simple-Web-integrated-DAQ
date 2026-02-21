@@ -11,7 +11,7 @@ class ZmqDataFrameSource : public IFrameSource {
   ZmqDataFrameSource(std::string endpoint, uint32_t poll_timeout_ms, uint32_t idle_timeout_sec);
   ~ZmqDataFrameSource() override;
 
-  SourceStatus next_frame(std::vector<uint8_t>& out_frame,
+  SourceStatus next_frame(FrameEnvelope& out_frame,
                           std::string& error_text,
                           const volatile std::sig_atomic_t* stop_requested = nullptr) override;
 

@@ -14,10 +14,16 @@ enum class SourceStatus {
   kError,
 };
 
+struct FrameEnvelope {
+  uint32_t run_number = 0;
+  uint64_t event_number = 0;
+  std::vector<uint8_t> payload;
+};
+
 class IFrameSource {
  public:
   virtual ~IFrameSource() = default;
-  virtual SourceStatus next_frame(std::vector<uint8_t>& out_frame,
+  virtual SourceStatus next_frame(FrameEnvelope& out_frame,
                                   std::string& error_text,
                                   const volatile std::sig_atomic_t* stop_requested = nullptr) = 0;
 };
@@ -26,13 +32,17 @@ class FileFrameSource : public IFrameSource {
  public:
   FileFrameSource(std::string path, std::size_t frame_size);
 
-  SourceStatus next_frame(std::vector<uint8_t>& out_frame,
+  SourceStatus next_frame(FrameEnvelope& out_frame,
                           std::string& error_text,
                           const volatile std::sig_atomic_t* stop_requested = nullptr) override;
 
  private:
+  uint32_t detect_run_number_from_path() const;
+
   std::string path_;
   std::size_t frame_size_;
+  uint32_t run_number_ = 0;
+  uint64_t next_event_number_ = 0;
   bool opened_ = false;
   bool eof_ = false;
   std::ifstream ifs_;
@@ -46,7 +56,7 @@ class LiveRunFileSource : public IFrameSource {
                     uint32_t poll_ms,
                     uint32_t idle_timeout_sec);
 
-  SourceStatus next_frame(std::vector<uint8_t>& out_frame,
+  SourceStatus next_frame(FrameEnvelope& out_frame,
                           std::string& error_text,
                           const volatile std::sig_atomic_t* stop_requested = nullptr) override;
 
@@ -58,6 +68,7 @@ class LiveRunFileSource : public IFrameSource {
   std::string output_dir_;
   std::size_t frame_size_;
   uint32_t current_run_;
+  uint64_t next_event_number_ = 0;
   uint32_t poll_ms_;
   uint32_t idle_timeout_sec_;
   std::optional<std::ifstream> ifs_;

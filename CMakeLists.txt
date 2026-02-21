@@ -4,36 +4,116 @@ project(SimpleDAQ LANGUAGES CXX)
 include(GNUInstallDirs)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBZMQ REQUIRED libzmq)
-find_package(ROOT QUIET COMPONENTS Core RIO Tree)
+find_package(ROOT QUIET COMPONENTS Core RIO Tree Hist Graf Gpad)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_library(daq_core_drivers
-  src/drivers/tcp_device_driver.cpp
+# ---------------------------------------------------------------------------
+# Concrete module sources
+# ---------------------------------------------------------------------------
+set(KC705_TOF_FRONTEND_SOURCES
   src/concrete_modules/kc705_tof/kc705_tof_validator.cpp
   src/concrete_modules/kc705_tof/kc705_tof_frontend.cpp
-  src/concrete_modules/module_registry.cpp
+)
+
+set(KC705_TOF_MONITOR_SOURCES
+  src/concrete_modules/kc705_tof/kc705_tof_decoder.cpp
+)
+
+set(KC705_TOF_MONITOR_ROOT_SOURCES
+  src/concrete_modules/kc705_tof/kc705_tof_overview_analysis.cpp
+)
+
+# ---------------------------------------------------------------------------
+# Shared sources
+# ---------------------------------------------------------------------------
+set(CORE_DRIVER_SOURCES
+  src/drivers/tcp_device_driver.cpp
   src/core/daq_cli.cpp
   src/core/daq_runtime.cpp
+  src/concrete_modules/module_registry.cpp
+  ${KC705_TOF_FRONTEND_SOURCES}
 )
-target_include_directories(daq_core_drivers PUBLIC src)
-target_compile_definitions(daq_core_drivers PRIVATE SIMPLEDAQ_ENABLE_FRONTEND_REGISTRY=1 SIMPLEDAQ_ENABLE_DECODER_REGISTRY=0)
 
-add_library(daq_control_api
+set(MONITOR_SOURCES
+  src/monitor/frame_source.cpp
+  src/monitor/pipeline.cpp
+  src/monitor/realtime_analysis.cpp
+  src/monitor/sink_realtime.cpp
+  src/monitor/sink_text.cpp
+  src/monitor/zmq_frame_source.cpp
+  src/concrete_modules/module_registry.cpp
+  ${KC705_TOF_MONITOR_SOURCES}
+)
+
+set(CONTROL_API_SOURCES
   src/control_api/zmq_control_client.cpp
   src/control_api/zmq_status_subscriber.cpp
 )
+
+set(SIMPLEDAQ_HAS_ROOT_VALUE 0)
+set(DAQ_MONITOR_ROOT_SOURCES)
+set(DAQ_MONITOR_ROOT_LIBRARIES)
+if(ROOT_FOUND)
+  set(SIMPLEDAQ_HAS_ROOT_VALUE 1)
+  list(APPEND DAQ_MONITOR_ROOT_SOURCES
+    src/monitor/sink_root.cpp
+    ${KC705_TOF_MONITOR_ROOT_SOURCES}
+  )
+  list(APPEND DAQ_MONITOR_ROOT_LIBRARIES
+    ROOT::Core
+    ROOT::RIO
+    ROOT::Tree
+    ROOT::Hist
+    ROOT::Graf
+    ROOT::Gpad
+  )
+endif()
+
+function(link_whole_archive_if_supported target lib)
+  if(UNIX AND NOT APPLE)
+    target_link_libraries(${target} PRIVATE "-Wl,--whole-archive" ${lib} "-Wl,--no-whole-archive")
+  else()
+    target_link_libraries(${target} PRIVATE ${lib})
+  endif()
+endfunction()
+
+function(apply_simpledaq_root_define target)
+  target_compile_definitions(${target} PRIVATE SIMPLEDAQ_HAS_ROOT=${SIMPLEDAQ_HAS_ROOT_VALUE})
+endfunction()
+
+# ---------------------------------------------------------------------------
+# Libraries
+# ---------------------------------------------------------------------------
+add_library(daq_core_drivers ${CORE_DRIVER_SOURCES})
+target_include_directories(daq_core_drivers PUBLIC src)
+
+add_library(daq_control_api ${CONTROL_API_SOURCES})
 target_link_libraries(daq_control_api PRIVATE ${LIBZMQ_LIBRARIES})
 target_include_directories(daq_control_api PUBLIC src ${LIBZMQ_INCLUDE_DIRS})
 target_compile_options(daq_control_api PRIVATE ${LIBZMQ_CFLAGS_OTHER})
 
+add_library(daq_monitor ${MONITOR_SOURCES})
+target_link_libraries(daq_monitor PRIVATE ${LIBZMQ_LIBRARIES})
+target_include_directories(daq_monitor PUBLIC src ${LIBZMQ_INCLUDE_DIRS})
+target_compile_options(daq_monitor PRIVATE ${LIBZMQ_CFLAGS_OTHER})
+if(DAQ_MONITOR_ROOT_SOURCES)
+  target_sources(daq_monitor PRIVATE ${DAQ_MONITOR_ROOT_SOURCES})
+  target_link_libraries(daq_monitor PRIVATE ${DAQ_MONITOR_ROOT_LIBRARIES})
+endif()
+apply_simpledaq_root_define(daq_monitor)
+
+# ---------------------------------------------------------------------------
+# Executables
+# ---------------------------------------------------------------------------
 add_executable(daq_core src/core/daq_core.cpp)
-target_link_libraries(daq_core PRIVATE daq_core_drivers)
+link_whole_archive_if_supported(daq_core daq_core_drivers)
 
 add_executable(daqd src/control/daqd.cpp)
-target_link_libraries(daqd PRIVATE daq_core_drivers ${LIBZMQ_LIBRARIES})
+link_whole_archive_if_supported(daqd daq_core_drivers)
+target_link_libraries(daqd PRIVATE ${LIBZMQ_LIBRARIES})
 target_include_directories(daqd PRIVATE ${LIBZMQ_INCLUDE_DIRS})
 target_compile_options(daqd PRIVATE ${LIBZMQ_CFLAGS_OTHER})
 
@@ -45,58 +125,24 @@ add_executable(daqmon src/control/daqmon.cpp)
 target_link_libraries(daqmon PRIVATE daq_control_api)
 target_include_directories(daqmon PRIVATE src)
 
-add_library(daq_monitor
-  src/monitor/frame_source.cpp
-  src/concrete_modules/module_registry.cpp
-  src/monitor/sink_text.cpp
-  src/monitor/pipeline.cpp
-  src/monitor/zmq_frame_source.cpp
-  src/concrete_modules/kc705_tof/kc705_tof_decoder.cpp
-)
-target_include_directories(daq_monitor PUBLIC src ${LIBZMQ_INCLUDE_DIRS})
-target_compile_options(daq_monitor PRIVATE ${LIBZMQ_CFLAGS_OTHER})
-target_link_libraries(daq_monitor PRIVATE ${LIBZMQ_LIBRARIES})
-target_compile_definitions(daq_monitor PRIVATE SIMPLEDAQ_ENABLE_FRONTEND_REGISTRY=0 SIMPLEDAQ_ENABLE_DECODER_REGISTRY=1)
-
-if(ROOT_FOUND)
-  target_sources(daq_monitor PRIVATE src/monitor/sink_root.cpp)
-  target_link_libraries(daq_monitor PRIVATE ROOT::Core ROOT::RIO ROOT::Tree)
-  target_compile_definitions(daq_monitor PRIVATE SIMPLEDAQ_HAS_ROOT=1)
-else()
-  target_compile_definitions(daq_monitor PRIVATE SIMPLEDAQ_HAS_ROOT=0)
-endif()
-
 add_executable(datamon src/control/datamon.cpp)
-target_link_libraries(datamon PRIVATE daq_monitor)
+link_whole_archive_if_supported(datamon daq_monitor)
 target_include_directories(datamon PRIVATE src)
-if(ROOT_FOUND)
-  target_compile_definitions(datamon PRIVATE SIMPLEDAQ_HAS_ROOT=1)
-else()
-  target_compile_definitions(datamon PRIVATE SIMPLEDAQ_HAS_ROOT=0)
-endif()
+apply_simpledaq_root_define(datamon)
 
-add_executable(kc705_tof_dummy_device src/concrete_modules/kc705_tof/kc705_tof_dummy_device.cpp)
-
-install(TARGETS daq_core
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+add_executable(kc705_tof_dummy_device
+  src/concrete_modules/kc705_tof/kc705_tof_dummy_device.cpp
 )
 
-install(TARGETS daqd
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
-
-install(TARGETS daqctl
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
-
-install(TARGETS daqmon
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
-
-install(TARGETS datamon
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
-
-install(TARGETS kc705_tof_dummy_device
+# ---------------------------------------------------------------------------
+# Install
+# ---------------------------------------------------------------------------
+install(TARGETS
+  daq_core
+  daqd
+  daqctl
+  daqmon
+  datamon
+  kc705_tof_dummy_device
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )

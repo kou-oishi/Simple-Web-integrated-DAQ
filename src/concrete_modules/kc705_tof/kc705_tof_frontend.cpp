@@ -5,6 +5,7 @@
 #include <string>
 
 #include "drivers/tcp_device_driver.hpp"
+#include "concrete_modules/module_registry.hpp"
 #include "concrete_modules/kc705_tof/kc705_tof_validator.hpp"
 
 namespace {
@@ -64,3 +65,5 @@ std::unique_ptr<IDeviceDriver> Kc705TofFrontend::create_driver(const DeviceSpec&
 std::unique_ptr<IDataValidator> Kc705TofFrontend::create_validator(const DeviceSpec& device) const {
   return std::make_unique<Kc705TofValidator>(device.board_id);
 }
+
+REGISTER_FRONTEND(Kc705TofFrontend);

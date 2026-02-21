@@ -1,10 +1,8 @@
 #pragma once
 
-#include <any>
 #include <cstdint>
 
-struct DecodedMessage {
+struct DecodedEventBase {
   uint32_t run_number = 0;
   uint64_t event_number = 0;
-  std::any payload;
 };

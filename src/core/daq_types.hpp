@@ -25,5 +25,7 @@ struct DaqConfig {
 
 struct FrameRecord {
   std::string source;
+  uint32_t run_number = 0;
+  uint64_t event_number = 0;
   std::vector<uint8_t> payload;
 };

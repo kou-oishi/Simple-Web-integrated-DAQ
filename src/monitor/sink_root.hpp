@@ -18,13 +18,15 @@ class RootTreeSink : public IEventSink {
 
   const IDecoder* decoder_;
   std::string output_path_;
-  std::vector<std::string> branch_names_;
+  std::vector<TreeBranchDef> branch_defs_;
+  std::vector<std::size_t> branch_value_positions_;
 
   class TFile* file_ = nullptr;
   class TTree* tree_ = nullptr;
   bool finalised_ = false;
 
-  unsigned long long event_index_ = 0;
-  std::vector<unsigned long long> branch_values_;
+  unsigned int run_number_ = 0;
+  unsigned long long event_number_ = 0;
+  std::vector<unsigned long long> branch_values_u64_;
+  std::vector<double> branch_values_f64_;
 };
-

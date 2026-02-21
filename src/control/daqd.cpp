@@ -1,6 +1,7 @@
 #include <csignal>
 #include <cctype>
 #include <chrono>
+#include <array>
 #include <cstring>
 #include <cerrno>
 #include <getopt.h>
@@ -15,6 +16,7 @@
 #include <zmq.h>
 
 #include "core/daq_cli.hpp"
+#include "core/data_frame_header.hpp"
 #include "core/daq_runtime.hpp"
 #include "core/defaults.hpp"
 
@@ -261,6 +263,9 @@ void publish_status(void* pub_sock, const std::string& payload) {
 
 void publish_data(void* pub_sock, const FrameRecord& rec) {
   const std::string topic = "data";
+  std::array<uint8_t, DataFrameHeader::kWireSize> header_wire{};
+  const DataFrameHeader header{.run_number = rec.run_number, .event_number = rec.event_number};
+  WriteDataFrameHeader(header, header_wire);
 
   const int flags_more = ZMQ_SNDMORE | ZMQ_DONTWAIT;
   const int flags_last = ZMQ_DONTWAIT;
@@ -269,6 +274,9 @@ void publish_data(void* pub_sock, const FrameRecord& rec) {
     return;
   }
   if (zmq_send(pub_sock, rec.source.data(), rec.source.size(), flags_more) < 0) {
+    return;
+  }
+  if (zmq_send(pub_sock, header_wire.data(), header_wire.size(), flags_more) < 0) {
     return;
   }
   if (zmq_send(pub_sock, rec.payload.data(), rec.payload.size(), flags_last) < 0) {

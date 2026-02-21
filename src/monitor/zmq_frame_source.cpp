@@ -5,6 +5,8 @@
 
 #include <zmq.h>
 
+#include "core/data_frame_header.hpp"
+
 namespace {
 
 enum class RecvStatus {
@@ -90,10 +92,10 @@ bool ZmqDataFrameSource::ensure_connected(std::string& error_text) {
   return true;
 }
 
-SourceStatus ZmqDataFrameSource::next_frame(std::vector<uint8_t>& out_frame,
+SourceStatus ZmqDataFrameSource::next_frame(FrameEnvelope& out_frame,
                                             std::string& error_text,
                                             const volatile std::sig_atomic_t* stop_requested) {
-  out_frame.clear();
+  out_frame.payload.clear();
   error_text.clear();
   if (stop_requested != nullptr && *stop_requested != 0) {
     return SourceStatus::kEof;
@@ -118,15 +120,18 @@ SourceStatus ZmqDataFrameSource::next_frame(std::vector<uint8_t>& out_frame,
 
     zmq_msg_t topic_msg;
     zmq_msg_t source_msg;
+    zmq_msg_t meta_msg;
     zmq_msg_t payload_msg;
     zmq_msg_init(&topic_msg);
     zmq_msg_init(&source_msg);
+    zmq_msg_init(&meta_msg);
     zmq_msg_init(&payload_msg);
 
     const RecvStatus topic_st = recv_msg(sub_, &topic_msg, stop_requested);
     if (topic_st != RecvStatus::kOk) {
       zmq_msg_close(&topic_msg);
       zmq_msg_close(&source_msg);
+      zmq_msg_close(&meta_msg);
       zmq_msg_close(&payload_msg);
       if (topic_st == RecvStatus::kInterrupted) {
         return SourceStatus::kEof;
@@ -142,13 +147,16 @@ SourceStatus ZmqDataFrameSource::next_frame(std::vector<uint8_t>& out_frame,
     }
 
     const RecvStatus source_st = recv_msg(sub_, &source_msg, stop_requested);
-    const RecvStatus payload_st = (source_st == RecvStatus::kOk) ? recv_msg(sub_, &payload_msg, stop_requested)
-                                                                 : source_st;
-    if (source_st != RecvStatus::kOk || payload_st != RecvStatus::kOk) {
+    const RecvStatus meta_st = (source_st == RecvStatus::kOk) ? recv_msg(sub_, &meta_msg, stop_requested) : source_st;
+    const RecvStatus payload_st =
+        (meta_st == RecvStatus::kOk) ? recv_msg(sub_, &payload_msg, stop_requested) : meta_st;
+    if (source_st != RecvStatus::kOk || meta_st != RecvStatus::kOk || payload_st != RecvStatus::kOk) {
       zmq_msg_close(&topic_msg);
       zmq_msg_close(&source_msg);
+      zmq_msg_close(&meta_msg);
       zmq_msg_close(&payload_msg);
-      if (source_st == RecvStatus::kInterrupted || payload_st == RecvStatus::kInterrupted) {
+      if (source_st == RecvStatus::kInterrupted || meta_st == RecvStatus::kInterrupted ||
+          payload_st == RecvStatus::kInterrupted) {
         return SourceStatus::kEof;
       }
       error_text = "recv multipart data frame failed";
@@ -162,19 +170,35 @@ SourceStatus ZmqDataFrameSource::next_frame(std::vector<uint8_t>& out_frame,
     if (topic != "data") {
       zmq_msg_close(&topic_msg);
       zmq_msg_close(&source_msg);
+      zmq_msg_close(&meta_msg);
       zmq_msg_close(&payload_msg);
       continue;
     }
 
+    DataFrameHeader header;
+    const auto* meta_data = static_cast<const uint8_t*>(zmq_msg_data(&meta_msg));
+    const size_t meta_size = zmq_msg_size(&meta_msg);
+    if (!ReadDataFrameHeader(meta_data, meta_size, header)) {
+      zmq_msg_close(&topic_msg);
+      zmq_msg_close(&source_msg);
+      zmq_msg_close(&meta_msg);
+      zmq_msg_close(&payload_msg);
+      error_text = "received invalid data frame metadata";
+      return SourceStatus::kError;
+    }
+
     const auto* payload_data = static_cast<const uint8_t*>(zmq_msg_data(&payload_msg));
     const size_t payload_size = zmq_msg_size(&payload_msg);
-    out_frame.assign(payload_data, payload_data + payload_size);
+    out_frame.payload.assign(payload_data, payload_data + payload_size);
+    out_frame.run_number = header.run_number;
+    out_frame.event_number = header.event_number;
 
     zmq_msg_close(&topic_msg);
     zmq_msg_close(&source_msg);
+    zmq_msg_close(&meta_msg);
     zmq_msg_close(&payload_msg);
 
-    if (out_frame.empty()) {
+    if (out_frame.payload.empty()) {
       error_text = "received empty payload frame";
       return SourceStatus::kError;
     }
