@@ -14,7 +14,10 @@ FileFrameSource::FileFrameSource(std::string path, std::size_t frame_size)
 
 uint32_t FileFrameSource::DetectRunNumberFromPath() const {
   const std::string filename = std::filesystem::path(path_).filename().string();
-  const std::size_t run_pos = filename.find("Run");
+  std::size_t run_pos = filename.find("run");
+  if (run_pos == std::string::npos) {
+    run_pos = filename.find("Run");
+  }
   if (run_pos == std::string::npos) {
     return 0;
   }
@@ -74,6 +77,7 @@ SourceStatus FileFrameSource::NextFrame(FrameEnvelope& out_frame,
   }
 
   out_frame.run_number = run_number_;
+  out_frame.subrun_number = 0;
   out_frame.event_number = next_event_number_++;
 
   return SourceStatus::kOk;
@@ -90,9 +94,10 @@ LiveRunFileSource::LiveRunFileSource(std::string output_dir,
       poll_ms_(poll_ms == 0 ? 100 : poll_ms),
       idle_timeout_sec_(idle_timeout_sec) {}
 
-std::string LiveRunFileSource::run_path(uint32_t run_number) const {
+std::string LiveRunFileSource::run_path(uint32_t run_number, uint32_t subrun_number) const {
   std::ostringstream oss;
-  oss << output_dir_ << "/Run" << std::setw(daq_defaults::kRunNumberWidth) << std::setfill('0') << run_number
+  oss << output_dir_ << "/run" << std::setw(daq_defaults::kRunNumberWidth) << std::setfill('0') << run_number
+      << "_sub" << std::setw(daq_defaults::kRunNumberWidth) << std::setfill('0') << subrun_number
       << ".dat";
   return oss.str();
 }
@@ -102,30 +107,39 @@ bool LiveRunFileSource::OpenCurrentFile(std::string& error_text) {
     return true;
   }
 
-  const std::string path = run_path(current_run_);
+  const std::string path = run_path(current_run_, current_subrun_);
   if (!std::filesystem::exists(path)) {
-    error_text = "waiting for Run file: " + path;
+    error_text = "waiting for run/subrun file: " + path;
     return false;
   }
 
   ifs_.emplace();
   ifs_->open(path, std::ios::binary);
   if (!ifs_->is_open()) {
-    error_text = "failed to open Run file: " + path;
+    error_text = "failed to open run/subrun file: " + path;
     ifs_.reset();
     return false;
   }
-
-  next_event_number_ = 0;
 
   return true;
 }
 
 bool LiveRunFileSource::TryAdvanceNextRun(std::string& error_text) {
+  const uint32_t next_subrun = current_subrun_ + 1;
+  const std::string next_subrun_path = run_path(current_run_, next_subrun);
+  if (std::filesystem::exists(next_subrun_path)) {
+    if (ifs_.has_value() && ifs_->is_open()) {
+      ifs_->close();
+    }
+    ifs_.reset();
+    current_subrun_ = next_subrun;
+    return OpenCurrentFile(error_text);
+  }
+
   const uint32_t next_run = current_run_ + 1;
-  const std::string next_path = run_path(next_run);
-  if (!std::filesystem::exists(next_path)) {
-    error_text = "waiting for next Run file: " + next_path;
+  const std::string next_run_path = run_path(next_run, 0);
+  if (!std::filesystem::exists(next_run_path)) {
+    error_text = "waiting for next run/subrun file: " + next_subrun_path + " or " + next_run_path;
     return false;
   }
 
@@ -134,6 +148,8 @@ bool LiveRunFileSource::TryAdvanceNextRun(std::string& error_text) {
   }
   ifs_.reset();
   current_run_ = next_run;
+  current_subrun_ = 0;
+  next_event_number_ = 0;
   return OpenCurrentFile(error_text);
 }
 
@@ -177,6 +193,7 @@ SourceStatus LiveRunFileSource::NextFrame(FrameEnvelope& out_frame,
     const std::streamsize n = ifs_->gcount();
     if (n == static_cast<std::streamsize>(frame_size_)) {
       out_frame.run_number = current_run_;
+      out_frame.subrun_number = current_subrun_;
       out_frame.event_number = next_event_number_++;
       return SourceStatus::kOk;
     }

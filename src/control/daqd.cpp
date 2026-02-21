@@ -108,6 +108,11 @@ class DaqService {
     return current_run_number_locked();
   }
 
+  uint32_t current_subrun_number() const {
+    std::lock_guard<std::mutex> lock(mu_);
+    return current_subrun_number_locked();
+  }
+
   std::string start(const std::string& args_text) {
     DaqConfig cfg;
     std::string err;
@@ -115,39 +120,14 @@ class DaqService {
       return "error " + err;
     }
 
-    {
-      std::lock_guard<std::mutex> lock(mu_);
-      if (running_) {
-        return "error already running";
-      }
-      stop_requested_ = 0;
-      running_ = true;
-      state_ = "running";
-      last_error_.clear();
-      active_cfg_ = cfg;
-      published_events_ = 0;
-      events_in_current_run_ = 0;
-      last_source_.clear();
-      started_at_ = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(mu_);
+    if (running_) {
+      return "error already running";
     }
-
-    worker_ = std::thread([this, cfg]() {
-      const int rc = RunDaqCore(cfg, stop_requested_, [this](const FrameRecord& rec) {
-        on_frame_published(rec);
-        if (frame_cb_) {
-          frame_cb_(rec);
-        }
-      });
-      std::lock_guard<std::mutex> lock(mu_);
-      running_ = false;
-      last_exit_code_ = rc;
-      state_ = (rc == 0) ? "idle" : "error";
-      if (rc != 0) {
-        last_error_ = "daq exited with non-zero";
-      }
-    });
-
-    return "Ok started";
+    if (state_ == "paused") {
+      return "error currently paused; use resume";
+    }
+    return start_locked(cfg, false);
   }
 
   std::string stop() {
@@ -155,6 +135,10 @@ class DaqService {
     {
       std::lock_guard<std::mutex> lock(mu_);
       if (!running_) {
+        if (state_ == "paused") {
+          state_ = "idle";
+          return "Ok stopped";
+        }
         return "error not running";
       }
       state_ = "stopping";
@@ -174,6 +158,52 @@ class DaqService {
     }
 
     return "Ok stopped";
+  }
+
+  std::string pause() {
+    std::thread t;
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      if (!running_) {
+        if (state_ == "paused") {
+          return "error already paused";
+        }
+        return "error not running";
+      }
+      state_ = "pausing";
+      stop_requested_ = 1;
+      t = std::move(worker_);
+    }
+
+    if (t.joinable()) {
+      t.join();
+    }
+
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      if (last_exit_code_ != 0) {
+        state_ = "error";
+        if (last_error_.empty()) {
+          last_error_ = "pause failed: daq exited with non-zero";
+        }
+        return "error pause failed";
+      }
+      const uint32_t current_run = current_run_number_locked();
+      active_cfg_.run_start = current_run + 1;
+      state_ = "paused";
+    }
+    return "Ok paused";
+  }
+
+  std::string resume() {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (running_) {
+      return "error already running";
+    }
+    if (state_ != "paused") {
+      return "error not paused";
+    }
+    return start_locked(active_cfg_, true);
   }
 
   void shutdown() {
@@ -203,6 +233,7 @@ class DaqService {
         << " last_exit=" << last_exit_code_
         << " events_total=" << published_events_
         << " Run=" << current_run_number_locked()
+        << " subrun=" << current_subrun_number_locked()
         << " events_in_run=" << events_in_current_run_;
     if (running_) {
       const auto elapsed = std::chrono::steady_clock::now() - started_at_;
@@ -219,24 +250,54 @@ class DaqService {
   }
 
   uint32_t current_run_number_locked() const {
+    return active_cfg_.run_start;
+  }
+
+  uint32_t current_subrun_number_locked() const {
     if (active_cfg_.events_per_file == 0) {
-      return active_cfg_.run_start;
+      return 0;
     }
-    return active_cfg_.run_start + static_cast<uint32_t>(published_events_ / active_cfg_.events_per_file);
+    if (published_events_ == 0) {
+      return 0;
+    }
+    return static_cast<uint32_t>((published_events_ - 1) / active_cfg_.events_per_file);
   }
 
   void on_frame_published(const FrameRecord& rec) {
     std::lock_guard<std::mutex> lock(mu_);
     ++published_events_;
     last_source_ = rec.source;
-    if (active_cfg_.events_per_file == 0) {
-      events_in_current_run_ = published_events_;
-      return;
-    }
-    events_in_current_run_ = published_events_ % active_cfg_.events_per_file;
-    if (events_in_current_run_ == 0) {
-      events_in_current_run_ = active_cfg_.events_per_file;
-    }
+    events_in_current_run_ = published_events_;
+  }
+
+  std::string start_locked(const DaqConfig& cfg, bool is_resume) {
+    stop_requested_ = 0;
+    running_ = true;
+    state_ = "running";
+    last_error_.clear();
+    active_cfg_ = cfg;
+    published_events_ = 0;
+    events_in_current_run_ = 0;
+    last_source_.clear();
+    started_at_ = std::chrono::steady_clock::now();
+
+    worker_ = std::thread([this, cfg]() {
+      const int rc = RunDaqCore(cfg, stop_requested_, [this](const FrameRecord& rec) {
+        on_frame_published(rec);
+        if (frame_cb_) {
+          frame_cb_(rec);
+        }
+      });
+      std::lock_guard<std::mutex> lock(mu_);
+      running_ = false;
+      last_exit_code_ = rc;
+      state_ = (rc == 0) ? "idle" : "error";
+      if (rc != 0) {
+        last_error_ = "daq exited with non-zero";
+      }
+    });
+
+    return is_resume ? "Ok resumed" : "Ok started";
   }
 
   mutable std::mutex mu_;
@@ -264,7 +325,11 @@ void publish_status(void* pub_sock, const std::string& payload) {
 void publish_data(void* pub_sock, const FrameRecord& rec) {
   const std::string topic = "data";
   std::array<uint8_t, DataFrameHeader::kWireSize> header_wire{};
-  const DataFrameHeader header{.run_number = rec.run_number, .event_number = rec.event_number};
+  const DataFrameHeader header{
+      .run_number = rec.run_number,
+      .subrun_number = rec.subrun_number,
+      .event_number = rec.event_number,
+  };
   WriteDataFrameHeader(header, header_wire);
 
   const int flags_more = ZMQ_SNDMORE | ZMQ_DONTWAIT;
@@ -417,6 +482,7 @@ int main(int argc, char** argv) {
   DaqService svc([&](const FrameRecord& rec) { publish_data(pub_data, rec); });
   std::string last_state = svc.state_name();
   uint32_t last_run = svc.current_run_number();
+  uint32_t last_subrun = svc.current_subrun_number();
   auto last_status_pub = std::chrono::steady_clock::now();
   publish_status(pub, svc.status_fields());
 
@@ -438,6 +504,10 @@ int main(int argc, char** argv) {
         resp = svc.status();
       } else if (cmd == "start") {
         resp = svc.start(rest);
+      } else if (cmd == "pause") {
+        resp = svc.pause();
+      } else if (cmd == "resume") {
+        resp = svc.resume();
       } else if (cmd == "stop") {
         resp = svc.stop();
       } else if (cmd == "shutdown") {
@@ -454,11 +524,13 @@ int main(int argc, char** argv) {
 
     const std::string state = svc.state_name();
     const uint32_t Run = svc.current_run_number();
+    const uint32_t subrun = svc.current_subrun_number();
     const auto now = std::chrono::steady_clock::now();
     const bool periodic = (now - last_status_pub) >= std::chrono::seconds(1);
-    if (state != last_state || Run != last_run || periodic) {
+    if (state != last_state || Run != last_run || subrun != last_subrun || periodic) {
       last_state = state;
       last_run = Run;
+      last_subrun = subrun;
       last_status_pub = now;
       publish_status(pub, svc.status_fields());
     }

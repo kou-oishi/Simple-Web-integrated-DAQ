@@ -46,7 +46,8 @@ bool TextSink::Consume(const DecodedMessage& message, std::string& error_text) {
   }
 
   if (use_stdout_) {
-    std::cout << "run=" << message.run_number << " event=" << message.event_number;
+    std::cout << "run=" << message.run_number << " subrun=" << message.subrun_number
+              << " event=" << message.event_number;
     if (!text.empty()) {
       std::cout << " " << text;
     }
@@ -55,7 +56,8 @@ bool TextSink::Consume(const DecodedMessage& message, std::string& error_text) {
     return true;
   }
 
-  ofs_ << "run=" << message.run_number << " event=" << message.event_number;
+  ofs_ << "run=" << message.run_number << " subrun=" << message.subrun_number
+       << " event=" << message.event_number;
   if (!text.empty()) {
     ofs_ << " " << text;
   }

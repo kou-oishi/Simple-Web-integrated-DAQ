@@ -26,6 +26,7 @@ class RootTreeSink : public IEventSink {
   bool finalised_ = false;
 
   unsigned int run_number_ = 0;
+  unsigned int subrun_number_ = 0;
   unsigned long long event_number_ = 0;
   std::vector<unsigned long long> branch_values_u64_;
   std::vector<double> branch_values_f64_;

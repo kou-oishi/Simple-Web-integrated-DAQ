@@ -53,6 +53,7 @@ bool Kc705TofDecoder::DecodeFrame(const std::vector<uint8_t>& frame,
     return false;
   }
   Event.run_number = out_message.run_number;
+  Event.subrun_number = out_message.subrun_number;
   Event.event_number = out_message.event_number;
 
   out_message.payload = Event;

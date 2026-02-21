@@ -191,6 +191,7 @@ SourceStatus ZmqDataFrameSource::NextFrame(FrameEnvelope& out_frame,
     const size_t payload_size = zmq_msg_size(&payload_msg);
     out_frame.payload.assign(payload_data, payload_data + payload_size);
     out_frame.run_number = header.run_number;
+    out_frame.subrun_number = header.subrun_number;
     out_frame.event_number = header.event_number;
 
     zmq_msg_close(&topic_msg);

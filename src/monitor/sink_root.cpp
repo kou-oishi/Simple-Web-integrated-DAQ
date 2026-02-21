@@ -48,6 +48,7 @@ bool RootTreeSink::EnsureOpen(std::string& error_text) {
 
   tree_ = new TTree("events", "Decoded monitor events");
   tree_->Branch("run_number", &run_number_);
+  tree_->Branch("subrun_number", &subrun_number_);
   tree_->Branch("event_number", &event_number_);
   for (std::size_t i = 0; i < branch_defs_.size(); ++i) {
     if (branch_defs_[i].type == TreeValueType::kU64) {
@@ -81,6 +82,7 @@ bool RootTreeSink::Consume(const DecodedMessage& message, std::string& error_tex
   }
 
   run_number_ = static_cast<unsigned int>(message.run_number);
+  subrun_number_ = static_cast<unsigned int>(message.subrun_number);
   event_number_ = static_cast<unsigned long long>(message.event_number);
   for (std::size_t i = 0; i < values.size(); ++i) {
     if (values[i].type != branch_defs_[i].type) {

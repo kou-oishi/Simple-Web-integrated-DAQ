@@ -125,47 +125,52 @@ bool run_writer(const DaqConfig& cfg, BlockingQueue<FrameRecord>& queue, const F
     return false;
   }
 
-  auto make_run_path = [&](uint32_t run_number) -> std::filesystem::path {
+  auto make_run_path = [&](uint32_t run_number, uint32_t subrun_number) -> std::filesystem::path {
     std::ostringstream oss;
-    oss << "Run" << std::setw(daq_defaults::kRunNumberWidth) << std::setfill('0') << run_number << ".dat";
+    oss << "run" << std::setw(daq_defaults::kRunNumberWidth) << std::setfill('0') << run_number
+        << "_sub" << std::setw(daq_defaults::kRunNumberWidth) << std::setfill('0') << subrun_number
+        << ".dat";
     return std::filesystem::path(cfg.output_dir) / oss.str();
   };
 
-  uint32_t run_number = cfg.run_start;
+  const uint32_t run_number = cfg.run_start;
+  uint32_t subrun_number = 0;
   uint32_t events_in_current_file = 0;
+  uint64_t next_event_number = 0;
   std::ofstream ofs;
 
-  auto open_run_file = [&](uint32_t Run) -> bool {
-    const std::filesystem::path path = make_run_path(Run);
+  auto open_run_file = [&](uint32_t subrun) -> bool {
+    const std::filesystem::path path = make_run_path(run_number, subrun);
     ofs = std::ofstream(path, std::ios::binary | std::ios::out | std::ios::trunc);
     if (!ofs.is_open()) {
       std::cerr << "Failed to open output file: " << path.string() << "\n";
       return false;
     }
     events_in_current_file = 0;
-    std::cerr << "[INFO] writing Run file: " << path.string() << "\n";
+    std::cerr << "[INFO] writing run/subrun file: " << path.string() << "\n";
     return true;
   };
 
   FrameRecord rec;
   while (queue.Pop(rec)) {
     if (!ofs.is_open()) {
-      if (!open_run_file(run_number)) {
+      if (!open_run_file(subrun_number)) {
         return false;
       }
     }
 
     if (events_in_current_file >= cfg.events_per_file) {
       ofs.close();
-      ++run_number;
-      if (!open_run_file(run_number)) {
+      ++subrun_number;
+      if (!open_run_file(subrun_number)) {
         return false;
       }
     }
 
     if (!rec.payload.empty()) {
       rec.run_number = run_number;
-      rec.event_number = static_cast<uint64_t>(events_in_current_file);
+      rec.subrun_number = subrun_number;
+      rec.event_number = next_event_number++;
 
       if (on_frame_ready) {
         on_frame_ready(rec);

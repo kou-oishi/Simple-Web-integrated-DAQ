@@ -77,10 +77,10 @@ To stop after a fixed duration:
   --duration-sec 10
 ```
 
-Validated frames are merged into run files.
+Validated frames are merged into run/subrun files.
 For `kc705_tof`, each 8-byte frame is written in host byte order for easier local numeric inspection.
-- `output_dir/run000000010.dat`
-- `output_dir/run000000011.dat`
+- `output_dir/run00010_sub00000.dat`
+- `output_dir/run00010_sub00001.dat`
 - ...
 
 Each file rolls over after `--events-per-file` validated events.
@@ -140,16 +140,16 @@ Current module:
 Data monitor from an existing `.dat` file:
 
 ```bash
-./build/datamon --input-file ./output/run00001.dat --decoder kc705_tof --print-every 1000
+./build/datamon --input-file ./output/run00001_sub00000.dat --decoder kc705_tof --print-every 1000
 ```
 
 Optional ROOT output (if built with ROOT available):
 
 ```bash
-./build/datamon --input-file ./output/run00001.dat --decoder kc705_tof --root-out ./monitor.root --no-console
+./build/datamon --input-file ./output/run00001_sub00000.dat --decoder kc705_tof --root-out ./monitor.root --no-console
 ```
 
-Live monitor from DAQ output directory (follows `runXXXXX.dat` as files grow/roll):
+Live monitor from DAQ output directory (follows `runXXXXX_subYYYYY.dat` as files grow/roll):
 
 ```bash
 ./build/datamon --live-output-dir ./output --run-start 1 --decoder kc705_tof --root-out ./live.root

@@ -16,6 +16,7 @@ enum class SourceStatus {
 
 struct FrameEnvelope {
   uint32_t run_number = 0;
+  uint32_t subrun_number = 0;
   uint64_t event_number = 0;
   std::vector<uint8_t> payload;
 };
@@ -63,11 +64,12 @@ class LiveRunFileSource : public IFrameSource {
  private:
   bool OpenCurrentFile(std::string& error_text);
   bool TryAdvanceNextRun(std::string& error_text);
-  std::string run_path(uint32_t run_number) const;
+  std::string run_path(uint32_t run_number, uint32_t subrun_number) const;
 
   std::string output_dir_;
   std::size_t frame_size_;
   uint32_t current_run_;
+  uint32_t current_subrun_ = 0;
   uint64_t next_event_number_ = 0;
   uint32_t poll_ms_;
   uint32_t idle_timeout_sec_;
