@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 try:
@@ -645,7 +645,7 @@ def get_monitor_screens() -> dict[str, Any]:
 
 
 @app.get("/monitor-snapshots/{relative_path:path}")
-def get_monitor_snapshot(relative_path: str) -> FileResponse:
+def get_monitor_snapshot(relative_path: str) -> Response:
     root = _monitor_snapshot_root().resolve()
     target = (root / relative_path).resolve()
     try:
@@ -654,7 +654,13 @@ def get_monitor_snapshot(relative_path: str) -> FileResponse:
         raise HTTPException(status_code=400, detail={"error": "invalid snapshot path"}) from ex
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail={"error": "snapshot not found"})
-    return FileResponse(target)
+    try:
+        payload = target.read_bytes()
+    except FileNotFoundError as ex:
+        raise HTTPException(status_code=404, detail={"error": "snapshot not found"}) from ex
+    except OSError as ex:
+        raise HTTPException(status_code=500, detail={"error": f"snapshot read failed: {ex}"}) from ex
+    return Response(content=payload, media_type="image/png")
 
 
 @app.post("/api/monitor/start")

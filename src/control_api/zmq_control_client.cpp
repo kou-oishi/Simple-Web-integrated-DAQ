@@ -8,6 +8,7 @@ namespace {
 
 constexpr int kSendTimeoutMs = 2000;
 constexpr int kRecvTimeoutMs = 2000;
+constexpr int kLingerMs = 0;
 
 }  // namespace
 
@@ -30,6 +31,7 @@ bool ZmqControlClient::Request(const std::string& Request, std::string& reply, s
     return false;
   }
 
+  zmq_setsockopt(req_sock, ZMQ_LINGER, &kLingerMs, sizeof(kLingerMs));
   zmq_setsockopt(req_sock, ZMQ_SNDTIMEO, &kSendTimeoutMs, sizeof(kSendTimeoutMs));
   zmq_setsockopt(req_sock, ZMQ_RCVTIMEO, &kRecvTimeoutMs, sizeof(kRecvTimeoutMs));
 

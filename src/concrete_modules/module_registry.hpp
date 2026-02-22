@@ -37,20 +37,26 @@ std::vector<std::string> ListRealtimeAnalysisFactories();
 #define SIMPLEDAQ_CONCAT_IMPL_(a, b) a##b
 #define SIMPLEDAQ_CONCAT_(a, b) SIMPLEDAQ_CONCAT_IMPL_(a, b)
 
+#if defined(__clang__) || defined(__GNUC__)
+#define SIMPLEDAQ_USED_ __attribute__((used))
+#else
+#define SIMPLEDAQ_USED_
+#endif
+
 #define REGISTER_FRONTEND(FRONTEND_TYPE)                                                                  \
   namespace {                                                                                              \
-  const bool SIMPLEDAQ_CONCAT_(kRegisterFrontend_, __COUNTER__) =                                         \
+  SIMPLEDAQ_USED_ const bool SIMPLEDAQ_CONCAT_(kRegisterFrontend_, __COUNTER__) =                         \
       RegisterDeviceFrontend(std::make_unique<FRONTEND_TYPE>());                                          \
   }
 
 #define REGISTER_DECODER(FACTORY_GETTER_FN)                                                                \
   namespace {                                                                                               \
-  const bool SIMPLEDAQ_CONCAT_(kRegisterDecoder_, __COUNTER__) =                                           \
+  SIMPLEDAQ_USED_ const bool SIMPLEDAQ_CONCAT_(kRegisterDecoder_, __COUNTER__) =                           \
       RegisterMonitorDecoderFactory(&(FACTORY_GETTER_FN()));                                                \
   }
 
 #define REGISTER_ANALYSIS(FACTORY_GETTER_FN)                                                               \
   namespace {                                                                                              \
-  const bool SIMPLEDAQ_CONCAT_(kRegisterAnalysis_, __COUNTER__) =                                         \
+  SIMPLEDAQ_USED_ const bool SIMPLEDAQ_CONCAT_(kRegisterAnalysis_, __COUNTER__) =                         \
       RegisterRealtimeAnalysisFactory(&(FACTORY_GETTER_FN()));                                            \
   }
