@@ -38,14 +38,17 @@ python3 -m web.server --host 0.0.0.0 --port 8080 --config web/defaults.json
 
 ## TCP dummy device
 
-`kc705_tof_dummy_device` sends 64-bit frames over TCP at a fixed interval.
+`kc705_tof_dummy_device` sends framed KC705 records over TCP at a fixed interval.
 
 Frame layout:
-- top 3 bits: board ID (`0-7`)
-- next 5 bits: channel ID (`0-31`)
-- lower 56 bits: random value
+- 2-byte header: `0xAA55`
+- 8-byte payload:
+  - top 3 bits: board ID (`0-7`)
+  - next 5 bits: channel ID (`0-31`)
+  - lower 56 bits: random value
+- 2-byte footer: `0x55AA`
 
-Frames are sent as 8-byte payloads in network byte order (big-endian).
+Header, payload, and footer are sent in this wire order (big-endian byte order).
 
 ### Run
 
@@ -69,18 +72,18 @@ cmake --install build --prefix ./install
 ### Quick receive test
 
 ```bash
-nc 127.0.0.1 9101 | xxd -p -c8
+nc 127.0.0.1 9101 | xxd -p -c12
 ```
 
-For `board-id=3` and `channel-id=17`, the first byte is `0x71` (`011` + `10001`).
+For `board-id=3` and `channel-id=17`, payload byte0 is `0x71` (`011` + `10001`), so each frame begins with `aa55 71...` and ends with `...55aa`.
 
 ## DAQ Core
 
 `daq_core` reads raw bytes from multiple TCP devices, passes them through a validator module, and writes validated frames to disk without decoding the payload.
 
 Devices are configured as `--device <frontend>=<frontend-specific-spec>`.
-The current frontend is `kc705_tof`, which uses TCP (`board_id@host:port`) and frames data as 8-byte KC705 TOF records.
-The validator checks that frame board ID matches the configured `board_id`.
+The current frontend is `kc705_tof`, which uses TCP (`board_id@host:port`) and framed KC705 TOF records (`0xAA55 + 8-byte payload + 0x55AA`).
+The validator checks header/footer and board ID, then forwards only the 8-byte payload to downstream processing.
 Runtime I/O is configured for low buffering (small FIFO reads and per-event flush on file writes).
 
 ### Run

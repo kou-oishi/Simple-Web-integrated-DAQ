@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -233,15 +234,6 @@ uint64_t build_word(uint8_t board_id, uint8_t channel_id, uint64_t value56) {
   return board | channel | value;
 }
 
-uint64_t host_to_be64(uint64_t value) {
-#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-  return (static_cast<uint64_t>(htonl(static_cast<uint32_t>(value & 0xFFFFFFFFULL))) << 32) |
-         htonl(static_cast<uint32_t>(value >> 32));
-#else
-  return value;
-#endif
-}
-
 bool send_all(int fd, const void* buf, size_t len) {
   const uint8_t* p = static_cast<const uint8_t*>(buf);
   size_t sent = 0;
@@ -303,9 +295,16 @@ int main(int argc, char** argv) {
         const uint64_t data56 = value_dist(rng);
         const uint8_t channel_id = static_cast<uint8_t>(channel_dist(rng));
         const uint64_t word = build_word(cfg.board_id, channel_id, data56);
-        const uint64_t be_word = host_to_be64(word);
+        std::array<uint8_t, 12> wire{};
+        wire[0] = 0xAA;
+        wire[1] = 0x55;
+        for (size_t i = 0; i < 8; ++i) {
+          wire[2 + i] = static_cast<uint8_t>((word >> ((7U - i) * 8U)) & 0xFFU);
+        }
+        wire[10] = 0x55;
+        wire[11] = 0xAA;
 
-        if (!send_all(client_fd, &be_word, sizeof(be_word))) {
+        if (!send_all(client_fd, wire.data(), wire.size())) {
           std::cout << "Client disconnected\n";
           break;
         }

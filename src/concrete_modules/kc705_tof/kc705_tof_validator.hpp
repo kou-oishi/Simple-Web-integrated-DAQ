@@ -15,7 +15,11 @@ class Kc705TofValidator : public IDataValidator {
   ValidationResult Feed(const uint8_t* data, size_t size, std::vector<std::vector<uint8_t>>& out_frames) override;
 
  private:
-  static constexpr size_t kFrameSize = 8;
+  static constexpr uint16_t kExpectedHeader = 0xAA55U;
+  static constexpr uint16_t kExpectedFooter = 0x55AAU;
+  static constexpr size_t kHeaderSize = 2;
+  static constexpr size_t kPayloadSize = 8;
+  static constexpr size_t kFooterSize = 2;
+  static constexpr size_t kWireFrameSize = kHeaderSize + kPayloadSize + kFooterSize;
   uint8_t expected_board_id_;
-  std::vector<uint8_t> buffer_;
 };
