@@ -27,8 +27,10 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
   std::unique_ptr<TCanvas> canvas_board_;
   std::unique_ptr<TCanvas> canvas_channel_;
   std::unique_ptr<TCanvas> canvas_trend_;
+  std::unique_ptr<TCanvas> canvas_tofs_;
   std::unique_ptr<TH1D> hist_board_;
   std::unique_ptr<TH1D> hist_channel_;
+  std::vector<std::unique_ptr<TH1D>> hist_tofs_;
   std::unique_ptr<TGraph> graph_trend_;
 };
 
