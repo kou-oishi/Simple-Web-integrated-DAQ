@@ -40,6 +40,7 @@ let runLogLimit = 50;
 let monitorRunning = false;
 const MAIN_FORM_STATE_KEY = 'simpledaq_main_form_state_v1';
 const MONITOR_STATE_KEY = 'simpledaq_monitor_state_v1';
+const DEVICES_STATE_KEY = 'simpledaq_devices_state_v1';
 
 function loadMainFormState() {
   try {
@@ -118,6 +119,28 @@ function saveMonitorState() {
       snapshot_interval_sec: Number(monitorSnapshotIntervalSec || 1.0),
     };
     window.localStorage.setItem(MONITOR_STATE_KEY, JSON.stringify(payload));
+  } catch (_) {
+    // ignore storage failures
+  }
+}
+
+function loadDevicesState() {
+  try {
+    const raw = window.localStorage.getItem(DEVICES_STATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed
+      .filter((item) => item && typeof item === 'object')
+      .map((item) => ({ ...item }));
+  } catch (_) {
+    return null;
+  }
+}
+
+function saveDevicesState() {
+  try {
+    window.localStorage.setItem(DEVICES_STATE_KEY, JSON.stringify(deviceEntries));
   } catch (_) {
     // ignore storage failures
   }
@@ -542,6 +565,12 @@ async function loadUiConfig() {
   monitorSnapshotIntervalSec = Math.max(0.1, Number((monitorSnapshotIntervalInput && monitorSnapshotIntervalInput.value) || 1.0));
   if (Array.isArray(uiConfig.devices)) {
     deviceEntries = uiConfig.devices.slice();
+  }
+  const savedDevices = loadDevicesState();
+  if (savedDevices) {
+    deviceEntries = savedDevices;
+  }
+  if (Array.isArray(deviceEntries)) {
     renderDeviceTable();
   }
 }
@@ -582,6 +611,7 @@ function renderDeviceTable() {
     btn.addEventListener('click', () => {
       const idx = Number(btn.getAttribute('data-del'));
       deviceEntries.splice(idx, 1);
+      saveDevicesState();
       renderDeviceTable();
     });
   });
@@ -860,6 +890,7 @@ document.getElementById('btn_add_device').addEventListener('click', () => {
   try {
     const entry = collectDeviceFromForm();
     deviceEntries.push(entry);
+    saveDevicesState();
     renderDeviceTable();
     setMessage('device added', true);
   } catch (e) {
