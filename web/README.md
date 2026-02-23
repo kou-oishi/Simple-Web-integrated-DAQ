@@ -21,9 +21,8 @@ Example config (`web/defaults.json`):
 ```json
 {
   "title": "TOF DAQ Control",
-  "daqd_path": "build/daqd",
+  "bin_path": "build",
   "daqd_log_path": "logs/daqd.log",
-  "datamon_path": "build/datamon",
   "datamon_log_path": "logs/datamon.log",
   "datamon_snapshot_dir": "/tmp/daq_monitors",
   "datamon_snapshot_interval_sec": 1.0,
@@ -44,6 +43,8 @@ Example config (`web/defaults.json`):
   ]
 }
 ```
+
+`bin_path` 配下に `daqctl` / `daqd` / `datamon` がある前提で解決します（必要なら `daqctl_path` / `daqd_path` / `datamon_path` で個別上書き可能）。
 
 ## Main APIs
 

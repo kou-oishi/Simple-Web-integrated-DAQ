@@ -89,6 +89,22 @@ def _resolve_repo_path(text: str) -> Path:
     return path
 
 
+def _resolve_bin_executable(config_key: str, env_key: str, default_path: Path, executable_name: str) -> Path:
+    configured = WEB_CONFIG.get(config_key)
+    if configured:
+        return _resolve_repo_path(str(configured))
+
+    env_value = os.getenv(env_key)
+    if env_value:
+        return _resolve_repo_path(str(env_value))
+
+    bin_path = WEB_CONFIG.get("bin_path")
+    if bin_path:
+        return _resolve_repo_path(str(bin_path)) / executable_name
+
+    return _resolve_repo_path(str(default_path))
+
+
 def _resolve_daqd_log_path() -> Path:
     configured = (
         WEB_CONFIG.get("daqd_log_path")
@@ -198,14 +214,13 @@ def _persist_datamon_state() -> None:
 
 
 def _daqctl_base_args() -> list[str]:
-    daqctl_path = Path(os.getenv("SIMPLEDAQ_DAQCTL", str(DEFAULT_DAQCTL))).expanduser()
+    daqctl_path = _resolve_bin_executable("daqctl_path", "SIMPLEDAQ_DAQCTL", DEFAULT_DAQCTL, "daqctl")
     endpoint = os.getenv("SIMPLEDAQ_CTRL_ENDPOINT") or DEFAULTS.get("kControlEndpoint") or "ipc:///tmp/simpledaq_ctrl.sock"
     return [str(daqctl_path), "--endpoint", endpoint]
 
 
 def _daqd_base_args() -> list[str]:
-    daqd_path_text = WEB_CONFIG.get("daqd_path") or os.getenv("SIMPLEDAQ_DAQD") or str(DEFAULT_DAQD)
-    daqd_path = _resolve_repo_path(str(daqd_path_text))
+    daqd_path = _resolve_bin_executable("daqd_path", "SIMPLEDAQ_DAQD", DEFAULT_DAQD, "daqd")
     endpoint = os.getenv("SIMPLEDAQ_CTRL_ENDPOINT") or DEFAULTS.get("kControlEndpoint") or "ipc:///tmp/simpledaq_ctrl.sock"
     status_endpoint = os.getenv("SIMPLEDAQ_STATUS_ENDPOINT") or DEFAULTS.get("kStatusEndpoint") or "ipc:///tmp/simpledaq_status.sock"
     data_endpoint = os.getenv("SIMPLEDAQ_DATA_ENDPOINT") or DEFAULTS.get("kDataEndpoint") or "ipc:///tmp/simpledaq_data.sock"
@@ -223,8 +238,7 @@ def _daqd_base_args() -> list[str]:
 
 
 def _datamon_base_args() -> list[str]:
-    datamon_path_text = WEB_CONFIG.get("datamon_path") or os.getenv("SIMPLEDAQ_DATAMON") or str(DEFAULT_DATAMON)
-    datamon_path = _resolve_repo_path(str(datamon_path_text))
+    datamon_path = _resolve_bin_executable("datamon_path", "SIMPLEDAQ_DATAMON", DEFAULT_DATAMON, "datamon")
     data_endpoint = os.getenv("SIMPLEDAQ_DATA_ENDPOINT") or DEFAULTS.get("kDataEndpoint") or "ipc:///tmp/simpledaq_data.sock"
     args = [str(datamon_path), "--data-endpoint", data_endpoint]
     poll_ms = WEB_CONFIG.get("datamon_poll_ms")

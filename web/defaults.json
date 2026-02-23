@@ -2,8 +2,7 @@
   "title": "KC705 TOF DAQ",
   "output_dir": "./test",
   
-  "daqd_path": "build/daqd",
-  "datamon_path": "build/datamon",
+  "bin_path": "build",
   "daqd_log_path": "logs/daqd.log",
   "datamon_log_path": "logs/datamon.log",
   "datamon_state_path": "/tmp/daq_monitors/datamon_state.json",
