@@ -17,6 +17,7 @@ inline constexpr uint32_t kReadTimeoutMs = 500;
 inline constexpr uint32_t kDurationSec = 0;
 inline constexpr uint32_t kStartupConnectTimeoutSec = 2;
 inline constexpr uint32_t kReconnectFailureTimeoutSec = 5;
+inline constexpr bool kAllowPartialRunOnRuntimeDisconnect = false;
 
 inline constexpr std::size_t kReadChunkSizeBytes = 8;
 inline constexpr int kRunNumberWidth = 5;

@@ -32,13 +32,15 @@ bool MySqlLogger::InsertRunLog(const RunLogEntry& entry, std::string& error_text
 
   std::ostringstream sql;
   sql << "INSERT INTO `" << daq_defaults::kMySqlRunLogTable << "` "
-      << "(run, subrun, nevents, start_time, end_time, status, comment) VALUES ("
+      << "(run, subrun, nevents, start_time, end_time, status, connected_modules, disconnected_modules, comment) VALUES ("
       << static_cast<unsigned long long>(entry.run_number) << ", "
       << static_cast<unsigned long long>(entry.subrun_number) << ", "
       << static_cast<unsigned long long>(entry.event_count) << ", "
       << "'" << EscapeSql(FormatTime(entry.start_time)) << "', "
       << "'" << EscapeSql(FormatTime(entry.end_time)) << "', "
       << "'" << EscapeSql(quote_status(entry.status)) << "', "
+      << "'" << EscapeSql(entry.connected_modules) << "', "
+      << "'" << EscapeSql(entry.disconnected_modules) << "', "
       << "'" << EscapeSql(entry.comment) << "')";
 
   return ExecuteQuery(sql.str(), error_text);
@@ -58,6 +60,23 @@ bool MySqlLogger::UpdateRunLogStatus(uint32_t run_number,
       << "SET status='" << EscapeSql(quote_status(status)) << "' "
       << "WHERE run=" << static_cast<unsigned long long>(run_number)
       << " AND subrun=" << static_cast<unsigned long long>(subrun_number);
+  return ExecuteQuery(sql.str(), error_text);
+}
+
+bool MySqlLogger::UpdateRunLogModules(uint32_t run_number,
+                                      const std::string& connected_modules,
+                                      const std::string& disconnected_modules,
+                                      std::string& error_text) const {
+  if (!IsEnabled()) {
+    error_text.clear();
+    return true;
+  }
+
+  std::ostringstream sql;
+  sql << "UPDATE `" << daq_defaults::kMySqlRunLogTable << "` "
+      << "SET connected_modules='" << EscapeSql(connected_modules) << "', "
+      << "disconnected_modules='" << EscapeSql(disconnected_modules) << "' "
+      << "WHERE run=" << static_cast<unsigned long long>(run_number);
   return ExecuteQuery(sql.str(), error_text);
 }
 

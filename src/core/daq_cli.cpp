@@ -44,7 +44,8 @@ void PrintDaqUsage(const char* prog) {
             << " --output-dir <dir> --device <frontend>=<spec> [--device <...>]"
             << " [--Run-start <>=0>] [--events-per-file <>=1>]"
             << " [--reconnect-ms <>=1>] [--read-timeout-ms <>=1>] [--duration-sec <>=1>]"
-            << " [--startup-connect-timeout-sec <>=1>] [--reconnect-failure-timeout-sec <>=1>]\n";
+            << " [--startup-connect-timeout-sec <>=1>] [--reconnect-failure-timeout-sec <>=1>]"
+            << " [--allow-partial-run-on-runtime-disconnect]\n";
   std::cerr << "Options:\n";
   std::cerr << "  -o, --output-dir <dir>         Output directory for Run files (required)\n";
   std::cerr << "  -d, --device <frontend>=<spec> Input device spec; repeatable\n";
@@ -56,6 +57,7 @@ void PrintDaqUsage(const char* prog) {
   std::cerr << "  -u, --duration-sec <sec>       Run duration in seconds (>= 1, 0 means unlimited)\n";
   std::cerr << "  -x, --startup-connect-timeout-sec <sec>  Startup connect timeout in seconds (>= 1)\n";
   std::cerr << "  -f, --reconnect-failure-timeout-sec <sec> Reconnect-failure timeout in seconds (>= 1)\n";
+  std::cerr << "  -p, --allow-partial-run-on-runtime-disconnect Continue run with remaining alive devices after runtime reconnect timeout\n";
   std::cerr << "  -h, --help                     Show this help\n";
   std::cerr << "Available frontends: " << supported_frontends_text() << "\n";
   std::cerr << "Example: --device kc705_tof=1@127.0.0.2:9101\n";
@@ -73,6 +75,7 @@ bool ParseDaqArgs(int argc, char** argv, DaqConfig& cfg) {
       {"duration-sec", required_argument, nullptr, 'u'},
       {"startup-connect-timeout-sec", required_argument, nullptr, 'x'},
       {"reconnect-failure-timeout-sec", required_argument, nullptr, 'f'},
+      {"allow-partial-run-on-runtime-disconnect", no_argument, nullptr, 'p'},
       {"help", no_argument, nullptr, 'h'},
       {nullptr, 0, nullptr, 0},
   };
@@ -80,7 +83,7 @@ bool ParseDaqArgs(int argc, char** argv, DaqConfig& cfg) {
   optind = 1;
   opterr = 0;
   while (true) {
-    const int c = ::getopt_long(argc, argv, ":o:d:r:e:m:c:t:u:x:f:h", kLongOpts, nullptr);
+    const int c = ::getopt_long(argc, argv, ":o:d:r:e:m:c:t:u:x:f:ph", kLongOpts, nullptr);
     if (c == -1) {
       break;
     }
@@ -180,6 +183,9 @@ bool ParseDaqArgs(int argc, char** argv, DaqConfig& cfg) {
         cfg.reconnect_failure_timeout_sec = tmp;
         break;
       }
+      case 'p':
+        cfg.allow_partial_run_on_runtime_disconnect = true;
+        break;
       case 'h':
         PrintDaqUsage(argv[0]);
         std::exit(0);

@@ -27,6 +27,7 @@ struct DaqConfig {
   uint32_t duration_sec = daq_defaults::kDurationSec;
   uint32_t startup_connect_timeout_sec = daq_defaults::kStartupConnectTimeoutSec;
   uint32_t reconnect_failure_timeout_sec = daq_defaults::kReconnectFailureTimeoutSec;
+  bool allow_partial_run_on_runtime_disconnect = daq_defaults::kAllowPartialRunOnRuntimeDisconnect;
 };
 
 struct FrameRecord {

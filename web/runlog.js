@@ -112,6 +112,9 @@ async function setSelectedAnalysis(moduleName) {
 
 function statusClass(statusText) {
   const s = String(statusText || '').toLowerCase();
+  if (s.startsWith('completed with ')) return 'runlog-status-warn';
+  if (s === 'completed' || s.startsWith('completed ')) return 'runlog-status-ok';
+  if (s.startsWith('exit with ')) return 'runlog-status-error';
   if (s === 'error' || s.includes('fail')) return 'runlog-status-error';
   if (s === 'warn' || s.includes('warn')) return 'runlog-status-warn';
   if (s === 'info' || s.includes('info')) return 'runlog-status-info';
@@ -156,7 +159,7 @@ async function refreshRunLog() {
     runLogBody.innerHTML = '';
     (data.rows || []).filter(matchFilter).forEach((r) => {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${r.run}</td><td>${r.subrun}</td><td>${r.nevents}</td><td>${r.start_time}</td><td>${r.end_time}</td><td class="${statusClass(r.status)}">${r.status || ''}</td><td>${r.comment || ''}</td>`;
+      tr.innerHTML = `<td>${r.run}</td><td>${r.subrun}</td><td>${r.nevents}</td><td>${r.start_time}</td><td>${r.end_time}</td><td class="${statusClass(r.status)}">${r.status || ''}</td><td>${r.connected || ''}</td><td>${r.disconnected || ''}</td><td>${r.comment || ''}</td>`;
       runLogBody.appendChild(tr);
     });
     updateViewLabels();

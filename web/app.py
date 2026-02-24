@@ -439,6 +439,19 @@ def _tail_lines(path: Path, limit: int) -> list[str]:
     return [line.rstrip("\n") for line in lines[-limit:]]
 
 
+def _to_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 def _send_selected_analysis(module: str, max_attempts: int = 6, send_timeout_ms: int = 120, recv_timeout_ms: int = 120) -> None:
     if zmq is None:
         raise RuntimeError("pyzmq is not available")
@@ -479,6 +492,7 @@ class StartRequest(BaseModel):
     duration_sec: int | None = Field(default=None, ge=1)
     startup_connect_timeout_sec: int | None = Field(default=None, ge=1)
     reconnect_failure_timeout_sec: int | None = Field(default=None, ge=1)
+    allow_partial_run_on_runtime_disconnect: bool | None = None
     comment: str | None = None
 
 
@@ -943,6 +957,10 @@ def get_ui_config() -> dict[str, Any]:
         reconnect_failure_timeout_sec = int(reconnect_failure_timeout_sec)
     except Exception:
         reconnect_failure_timeout_sec = 10
+    allow_partial_run_on_runtime_disconnect = _to_bool(
+        WEB_CONFIG.get("allow_partial_run_on_runtime_disconnect"),
+        False,
+    )
 
     devices = WEB_CONFIG.get("devices", [])
     if not isinstance(devices, list):
@@ -968,6 +986,7 @@ def get_ui_config() -> dict[str, Any]:
         "datamon_snapshot_select_endpoint": str(WEB_CONFIG.get("datamon_snapshot_select_endpoint", "ipc:///tmp/daq_monitors/select_analysis.sock")),
         "startup_connect_timeout_sec": startup_connect_timeout_sec,
         "reconnect_failure_timeout_sec": reconnect_failure_timeout_sec,
+        "allow_partial_run_on_runtime_disconnect": allow_partial_run_on_runtime_disconnect,
         "devices": devices,
     }
 
@@ -1147,6 +1166,14 @@ def start_daq(req: StartRequest) -> dict[str, Any]:
                 reconnect_failure_timeout_sec = None
     if reconnect_failure_timeout_sec is not None:
         args.extend(["--reconnect-failure-timeout-sec", str(reconnect_failure_timeout_sec)])
+    allow_partial_run_on_runtime_disconnect = req.allow_partial_run_on_runtime_disconnect
+    if allow_partial_run_on_runtime_disconnect is None:
+        allow_partial_run_on_runtime_disconnect = _to_bool(
+            WEB_CONFIG.get("allow_partial_run_on_runtime_disconnect"),
+            False,
+        )
+    if allow_partial_run_on_runtime_disconnect:
+        args.append("--allow-partial-run-on-runtime-disconnect")
     comment = req.comment
     if comment is None:
         raw_comment = WEB_CONFIG.get("comment")
@@ -1199,6 +1226,18 @@ def _get_run_log_rows(
     offset: int = Query(default=0, ge=0),
     view: str = Query(default="all"),
 ) -> dict[str, Any]:
+    def _normalize_module_name(name: str) -> str:
+        text = str(name or "").strip()
+        suffix = " (board id)"
+        if text.endswith(suffix):
+            text = text[: -len(suffix)].rstrip()
+        return text
+
+    def _normalize_module_list_text(text: str) -> str:
+        items = [_normalize_module_name(item) for item in str(text or "").split(",")]
+        items = [item for item in items if item]
+        return ", ".join(items)
+
     table = (
         os.getenv("SIMPLEDAQ_MYSQL_TABLE")
         or DEFAULTS.get("kMySqlRunLogTable")
@@ -1222,82 +1261,176 @@ def _get_run_log_rows(
         subrun_col = "subrun_number"
         nevents_col = "event_count"
 
+    cols_query = (
+        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+        f"WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='{table}'"
+    )
+    rc_cols, out_cols, err_cols = _run_mysql_query(cols_query)
+    if rc_cols != 0:
+        raise HTTPException(status_code=500, detail={"error": "mysql schema query failed", "stderr": err_cols, "query": cols_query})
+    cols = {line.strip() for line in out_cols.splitlines() if line.strip()}
+    connected_expr = "COALESCE(connected_modules, '')" if "connected_modules" in cols else "''"
+    disconnected_expr = "COALESCE(disconnected_modules, '')" if "disconnected_modules" in cols else "''"
+
     if mode == "all":
         query = (
-            f"SELECT {run_col}, {subrun_col}, {nevents_col}, start_time, end_time, status, comment "
+            f"SELECT {run_col}, {subrun_col}, {nevents_col}, start_time, end_time, status, comment, "
+            f"{connected_expr}, {disconnected_expr} "
             f"FROM `{table}` ORDER BY {run_col} DESC, {subrun_col} DESC LIMIT {int(limit)} OFFSET {int(offset)}"
         )
+        rc, out, err = _run_mysql_query(query)
+        if rc != 0:
+            raise HTTPException(status_code=500, detail={"error": "mysql query failed", "stderr": err, "query": query})
+
+        rows: list[dict[str, Any]] = []
+        if out:
+            for line in out.splitlines():
+                parts = line.split("\t")
+                if len(parts) != 9:
+                    continue
+                run, subrun, nevents, start_time, end_time, status, comment, connected, disconnected = parts
+                rows.append(
+                    {
+                        "run": int(run),
+                        "subrun": int(subrun),
+                        "nevents": int(nevents),
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "status": status,
+                        "comment": comment,
+                        "connected": _normalize_module_list_text(connected),
+                        "disconnected": _normalize_module_list_text(disconnected),
+                    }
+                )
+        return {"rows": rows, "limit": limit, "offset": offset, "view": mode}
     else:
-        query = (
-            "SELECT agg.run_val, agg.subrun_count, agg.nevents_total, agg.start_time, agg.end_time, "
-            "CASE "
-            "  WHEN ("
-            "         tail.status = 'completed' "
-            "         OR ("
-            "              tail.status = 'stopped' "
-            "              AND agg.stopped_count = 1 "
-            "              AND agg.error_count = 0 "
-            "              AND agg.unknown_count = 0 "
-            "            )"
-            "       ) AND agg.paused_count > 0 "
-            "  THEN CONCAT('completed (paused ', agg.paused_count, ' times)') "
-            "  WHEN ("
-            "         tail.status = 'completed' "
-            "         OR ("
-            "              tail.status = 'stopped' "
-            "              AND agg.stopped_count = 1 "
-            "              AND agg.error_count = 0 "
-            "              AND agg.unknown_count = 0 "
-            "            )"
-            "       ) "
-            "  THEN 'completed' "
-            "  ELSE tail.status "
-            "END AS status, "
-            "tail.comment "
-            "FROM ("
-            f"  SELECT {run_col} AS run_val, "
-            f"         COUNT(*) AS subrun_count, "
-            f"         SUM({nevents_col}) AS nevents_total, "
-            "         MIN(start_time) AS start_time, "
-            "         MAX(end_time) AS end_time, "
-            "         SUM(CASE WHEN status = 'paused' THEN 1 ELSE 0 END) AS paused_count, "
-            "         SUM(CASE WHEN status = 'stopped' THEN 1 ELSE 0 END) AS stopped_count, "
-            "         SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS error_count, "
-            "         SUM(CASE WHEN status NOT IN ('completed','paused','stopped','error') THEN 1 ELSE 0 END) AS unknown_count, "
-            f"         MAX({subrun_col}) AS last_subrun "
-            f"  FROM `{table}` "
-            f"  GROUP BY {run_col}"
-            ") agg "
-            f"JOIN `{table}` tail "
-            f"  ON tail.{run_col} = agg.run_val AND tail.{subrun_col} = agg.last_subrun "
-            "ORDER BY agg.run_val DESC "
-            f"LIMIT {int(limit)} OFFSET {int(offset)}"
+        run_query = (
+            f"SELECT {run_col} FROM `{table}` "
+            f"GROUP BY {run_col} ORDER BY {run_col} DESC LIMIT {int(limit)} OFFSET {int(offset)}"
         )
+        rc, out, err = _run_mysql_query(run_query)
+        if rc != 0:
+            raise HTTPException(status_code=500, detail={"error": "mysql run summary query failed", "stderr": err, "query": run_query})
+        run_ids: list[int] = []
+        if out:
+            for line in out.splitlines():
+                text = line.strip()
+                if text == "":
+                    continue
+                run_ids.append(int(text))
+        if not run_ids:
+            return {"rows": [], "limit": limit, "offset": offset, "view": mode}
 
-    rc, out, err = _run_mysql_query(query)
-    if rc != 0:
-        raise HTTPException(status_code=500, detail={"error": "mysql query failed", "stderr": err, "query": query})
+        run_id_list = ",".join(str(v) for v in run_ids)
+        query = (
+            f"SELECT {run_col}, {subrun_col}, {nevents_col}, start_time, end_time, status, comment, "
+            f"{connected_expr}, {disconnected_expr} "
+            f"FROM `{table}` WHERE {run_col} IN ({run_id_list}) "
+            f"ORDER BY {run_col} DESC, {subrun_col} DESC"
+        )
+        rc, out, err = _run_mysql_query(query)
+        if rc != 0:
+            raise HTTPException(status_code=500, detail={"error": "mysql query failed", "stderr": err, "query": query})
 
-    rows: list[dict[str, Any]] = []
-    if out:
-        for line in out.splitlines():
-            parts = line.split("\t")
-            if len(parts) != 7:
+        grouped: dict[int, dict[str, Any]] = {}
+
+        def _split_modules(text: str) -> list[str]:
+            items = [_normalize_module_name(item) for item in str(text or "").split(",")]
+            return [item for item in items if item]
+
+        if out:
+            for line in out.splitlines():
+                parts = line.split("\t")
+                if len(parts) != 9:
+                    continue
+                run, subrun, nevents, start_time, end_time, status, comment, connected, disconnected = parts
+                run_value = int(run)
+                subrun_value = int(subrun)
+                nevents_value = int(nevents)
+                if run_value not in grouped:
+                    grouped[run_value] = {
+                        "run": run_value,
+                        "subrun": 0,
+                        "nevents": 0,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "tail_subrun": subrun_value,
+                        "tail_status": status,
+                        "comment": comment,
+                        "connected": _normalize_module_list_text(connected),
+                        "disconnected_set": set(),
+                        "paused_count": 0,
+                        "stopped_count": 0,
+                        "error_count": 0,
+                        "unknown_count": 0,
+                    }
+                agg = grouped[run_value]
+                agg["subrun"] += 1
+                agg["nevents"] += nevents_value
+                if start_time < agg["start_time"]:
+                    agg["start_time"] = start_time
+                if end_time > agg["end_time"]:
+                    agg["end_time"] = end_time
+                if subrun_value > agg["tail_subrun"]:
+                    agg["tail_subrun"] = subrun_value
+                    agg["tail_status"] = status
+                    agg["comment"] = comment
+                    agg["connected"] = _normalize_module_list_text(connected)
+                for mod in _split_modules(disconnected):
+                    agg["disconnected_set"].add(mod)
+
+                status_l = str(status).strip().lower()
+                if status_l == "paused":
+                    agg["paused_count"] += 1
+                elif status_l == "stopped":
+                    agg["stopped_count"] += 1
+                elif status_l == "error":
+                    agg["error_count"] += 1
+                elif status_l == "completed" or status_l.startswith("completed "):
+                    pass
+                else:
+                    agg["unknown_count"] += 1
+
+        rows: list[dict[str, Any]] = []
+        for run_value in run_ids:
+            agg = grouped.get(run_value)
+            if agg is None:
                 continue
-            run, subrun, nevents, start_time, end_time, status, comment = parts
+            tail_status = str(agg["tail_status"] or "")
+            tail_status_l = tail_status.lower()
+            completed_like = tail_status_l == "completed" or tail_status_l.startswith("completed ")
+            finished_like = completed_like or (
+                tail_status_l == "stopped"
+                and agg["stopped_count"] == 1
+                and agg["error_count"] == 0
+                and agg["unknown_count"] == 0
+            )
+            if finished_like and agg["paused_count"] > 0:
+                merged_status = f"completed (paused {agg['paused_count']} times)"
+            elif finished_like:
+                merged_status = "completed"
+            else:
+                merged_status = tail_status
+
+            disconnected_sorted = sorted(agg["disconnected_set"])
+            if finished_like and len(disconnected_sorted) > 0:
+                merged_status = f"completed with {len(disconnected_sorted)} disconnects"
+                if agg["paused_count"] > 0:
+                    merged_status = f"{merged_status} (paused {agg['paused_count']} times)"
             rows.append(
                 {
-                    "run": int(run),
-                    "subrun": int(subrun),
-                    "nevents": int(nevents),
-                    "start_time": start_time,
-                    "end_time": end_time,
-                    "status": status,
-                    "comment": comment,
+                    "run": int(agg["run"]),
+                    "subrun": int(agg["subrun"]),
+                    "nevents": int(agg["nevents"]),
+                    "start_time": str(agg["start_time"]),
+                    "end_time": str(agg["end_time"]),
+                    "status": merged_status,
+                    "comment": str(agg["comment"]),
+                    "connected": str(agg["connected"]),
+                    "disconnected": ", ".join(disconnected_sorted),
                 }
             )
-
-    return {"rows": rows, "limit": limit, "offset": offset, "view": mode}
+        return {"rows": rows, "limit": limit, "offset": offset, "view": mode}
 
 
 @app.get("/api/run-log")

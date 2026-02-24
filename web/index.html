@@ -50,6 +50,12 @@
           <div id="status_error" class="status-error"></div>
           <div class="row"><label for="startup_connect_timeout_sec">Startup Connect Timeout [s]</label><input id="startup_connect_timeout_sec" type="number" min="1" value="5" /></div>
           <div class="row"><label for="reconnect_failure_timeout_sec">Reconnect Failure Timeout [s]</label><input id="reconnect_failure_timeout_sec" type="number" min="1" value="10" /></div>
+          <div class="row row-checkbox-left">
+            <label class="checkbox-inline" for="allow_partial_run_on_runtime_disconnect">
+              <input id="allow_partial_run_on_runtime_disconnect" type="checkbox" />
+              <span>Continue With Alive Modules</span>
+            </label>
+          </div>
           <div class="actions">
             <button class="primary" id="btn_start_daqd">Start daemon</button>
             <button class="danger" id="btn_shutdown">Shutdown daemon</button>

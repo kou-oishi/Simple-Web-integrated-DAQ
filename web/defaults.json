@@ -12,6 +12,7 @@
   "events_per_subrun": 100,
   "startup_connect_timeout_sec": 2,
   "reconnect_failure_timeout_sec": 5,
+  "allow_partial_run_on_runtime_disconnect": false,
   "comment": "",
   "main_run_log_limit": 10,
   "run_log_page_limit": 200,

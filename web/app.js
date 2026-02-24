@@ -59,11 +59,13 @@ function saveMainFormState() {
     const eventsPerFileInput = document.getElementById('events_per_file');
     const startupTimeoutInput = document.getElementById('startup_connect_timeout_sec');
     const reconnectFailureTimeoutInput = document.getElementById('reconnect_failure_timeout_sec');
+    const partialRunInput = document.getElementById('allow_partial_run_on_runtime_disconnect');
     const commentInput = document.getElementById('comment');
     const payload = {
       events_per_file: eventsPerFileInput ? String(eventsPerFileInput.value || '') : '',
       startup_connect_timeout_sec: startupTimeoutInput ? String(startupTimeoutInput.value || '') : '',
       reconnect_failure_timeout_sec: reconnectFailureTimeoutInput ? String(reconnectFailureTimeoutInput.value || '') : '',
+      allow_partial_run_on_runtime_disconnect: partialRunInput ? !!partialRunInput.checked : false,
       comment: commentInput ? String(commentInput.value || '') : '',
     };
     window.localStorage.setItem(MAIN_FORM_STATE_KEY, JSON.stringify(payload));
@@ -77,6 +79,7 @@ function bindMainFormStateSave() {
     'events_per_file',
     'startup_connect_timeout_sec',
     'reconnect_failure_timeout_sec',
+    'allow_partial_run_on_runtime_disconnect',
     'comment',
   ];
   ids.forEach((id) => {
@@ -513,6 +516,7 @@ async function loadUiConfig() {
   const eventsPerFileInput = document.getElementById('events_per_file');
   const startupTimeoutInput = document.getElementById('startup_connect_timeout_sec');
   const reconnectFailureTimeoutInput = document.getElementById('reconnect_failure_timeout_sec');
+  const partialRunInput = document.getElementById('allow_partial_run_on_runtime_disconnect');
   const commentInput = document.getElementById('comment');
   const monitorSnapshotIntervalInput = document.getElementById('monitor_snapshot_interval_sec');
   if (uiConfig.events_per_file) {
@@ -523,6 +527,9 @@ async function loadUiConfig() {
   }
   if (uiConfig.reconnect_failure_timeout_sec) {
     if (reconnectFailureTimeoutInput) reconnectFailureTimeoutInput.value = Number(uiConfig.reconnect_failure_timeout_sec);
+  }
+  if (partialRunInput && uiConfig.allow_partial_run_on_runtime_disconnect !== undefined) {
+    partialRunInput.checked = !!uiConfig.allow_partial_run_on_runtime_disconnect;
   }
   if (uiConfig.comment !== undefined && uiConfig.comment !== null) {
     if (commentInput) commentInput.value = String(uiConfig.comment);
@@ -540,6 +547,9 @@ async function loadUiConfig() {
     }
     if (reconnectFailureTimeoutInput && saved.reconnect_failure_timeout_sec !== undefined) {
       reconnectFailureTimeoutInput.value = String(saved.reconnect_failure_timeout_sec);
+    }
+    if (partialRunInput && saved.allow_partial_run_on_runtime_disconnect !== undefined) {
+      partialRunInput.checked = !!saved.allow_partial_run_on_runtime_disconnect;
     }
     if (commentInput && saved.comment !== undefined) {
       commentInput.value = String(saved.comment);
@@ -661,6 +671,7 @@ function buildStartPayload() {
   const eventsInput = document.getElementById('events_per_file');
   const startupTimeoutInput = document.getElementById('startup_connect_timeout_sec');
   const reconnectFailureTimeoutInput = document.getElementById('reconnect_failure_timeout_sec');
+  const partialRunInput = document.getElementById('allow_partial_run_on_runtime_disconnect');
   const commentInput = document.getElementById('comment');
   const eventsRaw = eventsInput ? eventsInput.value.trim() : '';
   const startupTimeoutRaw = startupTimeoutInput ? startupTimeoutInput.value.trim() : '';
@@ -672,6 +683,7 @@ function buildStartPayload() {
   if (eventsRaw !== '') payload.events_per_file = Number(eventsRaw);
   if (startupTimeoutRaw !== '') payload.startup_connect_timeout_sec = Number(startupTimeoutRaw);
   if (reconnectFailureTimeoutRaw !== '') payload.reconnect_failure_timeout_sec = Number(reconnectFailureTimeoutRaw);
+  if (partialRunInput) payload.allow_partial_run_on_runtime_disconnect = !!partialRunInput.checked;
   return payload;
 }
 
@@ -699,7 +711,13 @@ async function refreshRunLog() {
       const statusText = String(r.status || '');
       const statusLower = statusText.toLowerCase();
       let statusClass = '';
-      if (statusLower === 'error' || statusLower.includes('fail')) {
+      if (statusLower.startsWith('completed with ')) {
+        statusClass = 'runlog-status-warn';
+      } else if (statusLower === 'completed' || statusLower.startsWith('completed ')) {
+        statusClass = 'runlog-status-ok';
+      } else if (statusLower.startsWith('exit with ')) {
+        statusClass = 'runlog-status-error';
+      } else if (statusLower === 'error' || statusLower.includes('fail')) {
         statusClass = 'runlog-status-error';
       } else if (statusLower === 'warn' || statusLower.includes('warn')) {
         statusClass = 'runlog-status-warn';

@@ -54,6 +54,10 @@ std::string device_label(const DeviceSpec& spec) {
          std::to_string(spec.port);
 }
 
+std::string device_status_label(const DeviceSpec& spec) {
+  return spec.frontend + "_" + std::to_string(static_cast<unsigned>(spec.board_id));
+}
+
 void run_worker(const DeviceSpec& spec,
                 size_t worker_index,
                 const DaqConfig& cfg,
@@ -63,6 +67,10 @@ void run_worker(const DeviceSpec& spec,
                 const std::chrono::steady_clock::time_point& startup_deadline,
                 std::vector<std::atomic<bool>>& connected_once,
                 std::atomic<uint32_t>& connected_count,
+                std::vector<std::atomic<bool>>& worker_marked_dead,
+                std::atomic<uint32_t>& alive_worker_count,
+                std::vector<std::atomic<uint64_t>>& disconnect_event_count,
+                std::atomic<bool>& stopped_by_disconnect_exhaustion,
                 std::atomic<bool>& startup_failed,
                 std::once_flag& startup_notify_once,
                 const StartupStatusCallback& on_startup_status,
@@ -91,7 +99,9 @@ void run_worker(const DeviceSpec& spec,
 
   while (running.load() && stop_requested == 0) {
     if (!driver->ConnectDevice()) {
-      log_line("[WARN] Connect failed: " + device_label(spec));
+      if (!worker_marked_dead[worker_index].load()) {
+        log_line("[WARN] Connect failed: " + device_label(spec));
+      }
       if (!connected_once[worker_index].load() &&
           std::chrono::steady_clock::now() >= startup_deadline) {
         const std::string msg = "startup failed: cannot connect " + device_label(spec);
@@ -106,22 +116,60 @@ void run_worker(const DeviceSpec& spec,
         queue.Close();
         return;
       }
-      if (connected_once[worker_index].load()) {
+      if (connected_once[worker_index].load() && !worker_marked_dead[worker_index].load()) {
         const auto now = std::chrono::steady_clock::now();
         if (!reconnect_window_active) {
           reconnect_window_active = true;
           reconnect_deadline = now + std::chrono::seconds(cfg.reconnect_failure_timeout_sec);
         } else if (now >= reconnect_deadline) {
-          const std::string msg =
-              "runtime failed: reconnect timeout for " + device_label(spec);
-          log_line("[ERROR] " + msg);
-          if (on_runtime_error) {
-            on_runtime_error(msg);
+          const bool startup_completed = connected_count.load() == connected_once.size();
+          if (cfg.allow_partial_run_on_runtime_disconnect && startup_completed) {
+            bool switched_to_degraded = false;
+            uint32_t alive_now = alive_worker_count.load();
+            while (alive_now > 1) {
+              if (alive_worker_count.compare_exchange_weak(alive_now, alive_now - 1)) {
+                switched_to_degraded = true;
+                break;
+              }
+            }
+            if (switched_to_degraded) {
+              worker_marked_dead[worker_index].store(true);
+              disconnect_event_count[worker_index].fetch_add(1);
+              reconnect_window_active = false;
+              const std::string msg =
+                  "runtime degraded: lost device " + device_label(spec) +
+                  ", keep run alive and continue reconnect attempts";
+              log_line("[ERROR] " + msg);
+              if (on_runtime_error) {
+                on_runtime_error(msg);
+              }
+            } else {
+              worker_marked_dead[worker_index].store(true);
+              disconnect_event_count[worker_index].fetch_add(1);
+              stopped_by_disconnect_exhaustion.store(true);
+              const std::string msg =
+                  "runtime failed: all modules disconnected (last timeout: " + device_label(spec) + ")";
+              log_line("[ERROR] " + msg);
+              if (on_runtime_error) {
+                on_runtime_error(msg);
+              }
+              startup_failed.store(true);
+              running.store(false);
+              queue.Close();
+              return;
+            }
+          } else {
+            const std::string msg =
+                "runtime failed: reconnect timeout for " + device_label(spec);
+            log_line("[ERROR] " + msg);
+            if (on_runtime_error) {
+              on_runtime_error(msg);
+            }
+            startup_failed.store(true);
+            running.store(false);
+            queue.Close();
+            return;
           }
-          startup_failed.store(true);
-          running.store(false);
-          queue.Close();
-          return;
         }
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(cfg.reconnect_ms));
@@ -139,6 +187,14 @@ void run_worker(const DeviceSpec& spec,
           }
         });
       }
+    }
+
+    if (worker_marked_dead[worker_index].exchange(false)) {
+      const uint32_t alive_now = alive_worker_count.fetch_add(1) + 1;
+      std::ostringstream oss;
+      oss << "[INFO] recovered device: " << device_label(spec)
+          << " (alive_modules=" << alive_now << "/" << connected_once.size() << ")";
+      log_line(oss.str());
     }
 
     log_line("[INFO] connected: " + device_label(spec));
@@ -204,6 +260,9 @@ void run_worker(const DeviceSpec& spec,
 bool run_writer(const DaqConfig& cfg,
                 BlockingQueue<FrameRecord>& queue,
                 const FramePublishCallback& on_frame_ready,
+                const std::vector<std::atomic<uint64_t>>& disconnect_event_count,
+                const std::vector<std::atomic<bool>>& worker_marked_dead,
+                const std::atomic<bool>& stopped_by_disconnect_exhaustion,
                 const std::atomic<bool>& run_failed) {
   std::error_code ec;
   std::filesystem::create_directories(cfg.output_dir, ec);
@@ -227,11 +286,86 @@ bool run_writer(const DaqConfig& cfg,
   std::chrono::system_clock::time_point subrun_start_time{};
   std::ofstream ofs;
   MySqlLogger mysql_logger;
+  std::vector<uint64_t> seen_disconnect_count(cfg.devices.size(), 0);
+  std::vector<bool> disconnected_in_subrun(cfg.devices.size(), false);
+  std::ostringstream connected_ss;
+  for (size_t i = 0; i < cfg.devices.size(); ++i) {
+    if (i > 0) {
+      connected_ss << ", ";
+    }
+    connected_ss << device_status_label(cfg.devices[i]);
+  }
+  const std::string connected_modules_text = connected_ss.str();
+
+  auto refresh_disconnect_events = [&]() {
+    if (!cfg.allow_partial_run_on_runtime_disconnect) {
+      return;
+    }
+    for (size_t i = 0; i < disconnect_event_count.size(); ++i) {
+      const uint64_t current = disconnect_event_count[i].load();
+      if (current > seen_disconnect_count[i]) {
+        disconnected_in_subrun[i] = true;
+        seen_disconnect_count[i] = current;
+      }
+    }
+  };
+
+  auto reset_subrun_disconnect_tracking = [&]() {
+    for (size_t i = 0; i < disconnect_event_count.size(); ++i) {
+      seen_disconnect_count[i] = disconnect_event_count[i].load();
+      disconnected_in_subrun[i] = false;
+    }
+  };
+
+  auto status_with_disconnects = [&](const std::string& base_status) -> std::string {
+    if (!cfg.allow_partial_run_on_runtime_disconnect || base_status != "completed") {
+      return base_status;
+    }
+    size_t disconnected_count = 0;
+    for (size_t i = 0; i < disconnected_in_subrun.size(); ++i) {
+      if (!disconnected_in_subrun[i] && !worker_marked_dead[i].load()) {
+        continue;
+      }
+      ++disconnected_count;
+    }
+    if (disconnected_count == 0) {
+      return base_status;
+    }
+    std::ostringstream out;
+    out << "completed with " << disconnected_count << " disconnects";
+    return out.str();
+  };
+
+  auto active_disconnected_count = [&]() -> size_t {
+    size_t count = 0;
+    for (size_t i = 0; i < worker_marked_dead.size(); ++i) {
+      if (worker_marked_dead[i].load()) {
+        ++count;
+      }
+    }
+    return count;
+  };
+
+  auto active_disconnected_modules_text = [&]() -> std::string {
+    std::ostringstream out;
+    bool first = true;
+    for (size_t i = 0; i < worker_marked_dead.size(); ++i) {
+      if (!worker_marked_dead[i].load()) {
+        continue;
+      }
+      if (!first) {
+        out << ", ";
+      }
+      first = false;
+      out << device_status_label(cfg.devices[i]);
+    }
+    return out.str();
+  };
 
   auto write_run_log = [&](uint32_t subrun,
                            uint64_t event_count,
                            const std::chrono::system_clock::time_point& start_time,
-                           const char* status,
+                           const std::string& status,
                            std::string& out_error_text) -> bool {
     out_error_text.clear();
     if (event_count == 0 || !mysql_logger.IsEnabled()) {
@@ -243,7 +377,9 @@ bool run_writer(const DaqConfig& cfg,
     entry.event_count = event_count;
     entry.start_time = start_time;
     entry.end_time = std::chrono::system_clock::now();
-    entry.status = status == nullptr ? "stopped" : status;
+    entry.status = status.empty() ? "stopped" : status;
+    entry.connected_modules = connected_modules_text;
+    entry.disconnected_modules = active_disconnected_modules_text();
     entry.comment = cfg.comment;
     return mysql_logger.InsertRunLog(entry, out_error_text);
   };
@@ -257,12 +393,15 @@ bool run_writer(const DaqConfig& cfg,
     }
     events_in_current_file = 0;
     subrun_start_time = std::chrono::system_clock::now();
+    reset_subrun_disconnect_tracking();
     log_line("[INFO] writing run/subrun file: " + path.string());
     return true;
   };
 
   FrameRecord rec;
   while (queue.Pop(rec)) {
+    refresh_disconnect_events();
+
     if (!ofs.is_open()) {
       if (!open_run_file(subrun_number)) {
         return false;
@@ -271,7 +410,12 @@ bool run_writer(const DaqConfig& cfg,
 
     if (events_in_current_file >= cfg.events_per_file) {
       std::string mysql_error;
-      if (!write_run_log(subrun_number, events_in_current_file, subrun_start_time, "completed", mysql_error)) {
+      if (!write_run_log(
+              subrun_number,
+              events_in_current_file,
+              subrun_start_time,
+              status_with_disconnects("completed"),
+              mysql_error)) {
         log_line("[ERROR] failed to insert run log into MySQL: " + mysql_error);
         return false;
       }
@@ -316,11 +460,17 @@ bool run_writer(const DaqConfig& cfg,
   }
 
   if (ofs.is_open()) {
-    const char* final_status = nullptr;
+    refresh_disconnect_events();
+    std::string final_status;
     if (run_failed.load()) {
-      final_status = "error";
+      if (stopped_by_disconnect_exhaustion.load()) {
+        const size_t n = active_disconnected_count();
+        final_status = "exit with " + std::to_string(n) + " disconnects";
+      } else {
+        final_status = "error";
+      }
     } else if (cfg.events_per_file > 0 && events_in_current_file >= cfg.events_per_file) {
-      final_status = "completed";
+      final_status = status_with_disconnects("completed");
     } else {
       final_status = "stopped";
     }
@@ -365,6 +515,16 @@ int RunDaqCore(const DaqConfig& cfg,
     connected_once[i].store(false);
   }
   std::atomic<uint32_t> connected_count{0};
+  std::vector<std::atomic<bool>> worker_marked_dead(effective_cfg.devices.size());
+  for (size_t i = 0; i < worker_marked_dead.size(); ++i) {
+    worker_marked_dead[i].store(false);
+  }
+  std::atomic<uint32_t> alive_worker_count{static_cast<uint32_t>(effective_cfg.devices.size())};
+  std::vector<std::atomic<uint64_t>> disconnect_event_count(effective_cfg.devices.size());
+  for (size_t i = 0; i < disconnect_event_count.size(); ++i) {
+    disconnect_event_count[i].store(0);
+  }
+  std::atomic<bool> stopped_by_disconnect_exhaustion{false};
   std::atomic<bool> startup_failed{false};
   std::once_flag startup_notify_once;
   const auto startup_deadline =
@@ -378,7 +538,14 @@ int RunDaqCore(const DaqConfig& cfg,
   }
 
   std::thread writer([&]() {
-    if (!run_writer(effective_cfg, queue, on_frame_ready, startup_failed)) {
+    if (!run_writer(
+            effective_cfg,
+            queue,
+            on_frame_ready,
+            disconnect_event_count,
+            worker_marked_dead,
+            stopped_by_disconnect_exhaustion,
+            startup_failed)) {
       writer_ok.store(false);
       startup_failed.store(true);
       running.store(false);
@@ -400,6 +567,10 @@ int RunDaqCore(const DaqConfig& cfg,
                  startup_deadline,
                  connected_once,
                  connected_count,
+                 worker_marked_dead,
+                 alive_worker_count,
+                 disconnect_event_count,
+                 stopped_by_disconnect_exhaustion,
                  startup_failed,
                  startup_notify_once,
                  on_startup_status,
