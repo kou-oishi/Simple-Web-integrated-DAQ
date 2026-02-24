@@ -3,8 +3,7 @@
   "output_dir": "./test",
   
   "bin_path": "build",
-  "daqd_log_path": "logs/daqd.log",
-  "datamon_log_path": "logs/datamon.log",
+  "log_path": "logs",
   "datamon_state_path": "/tmp/daq_monitors/datamon_state.json",
   "datamon_snapshot_dir": "/tmp/daq_monitors",
   "datamon_snapshot_select_endpoint": "ipc:///tmp/daq_monitors/select_analysis.sock",
