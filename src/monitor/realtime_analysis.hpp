@@ -31,7 +31,22 @@ class IRealtimeAnalysis {
   virtual ~IRealtimeAnalysis() = default;
 
   virtual bool Initialise(std::string& error_text) = 0;
+  virtual bool BeginOfRun(uint32_t run_number, std::string& error_text) {
+    static_cast<void>(run_number);
+    error_text.clear();
+    return true;
+  }
+  virtual bool EndOfRun(uint32_t run_number, std::string& error_text) {
+    static_cast<void>(run_number);
+    error_text.clear();
+    return true;
+  }
   virtual bool Event(const DecodedMessage& message, std::string& error_text) = 0;
+  // Called immediately before drawable objects are redrawn/snapshotted.
+  virtual bool UpdateDrawables(std::string& error_text) {
+    error_text.clear();
+    return true;
+  }
   virtual bool Finalise(std::string& error_text) = 0;
 
   void SetDisplayRegistry(IRealtimeDisplayRegistry* registry) { display_registry_ = registry; }

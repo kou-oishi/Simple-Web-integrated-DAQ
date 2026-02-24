@@ -4,7 +4,7 @@
 
 namespace {
 
-constexpr double kTofScale = 1.0e-6;
+constexpr double kTimeScale = 4.0e-9;  // 4 ns per count
 
 uint64_t read_be_u64(const uint8_t* p) {
   uint64_t word = 0;
@@ -40,8 +40,8 @@ bool Kc705TofDecoder::frame_to_event(const std::vector<uint8_t>& frame,
   out_event.raw_word = word;
   out_event.board_id = static_cast<uint8_t>((word >> 61U) & 0x7U);
   out_event.channel_id = static_cast<uint8_t>((word >> 56U) & 0x1FU);
-  const uint64_t raw_tof = word & 0x00FFFFFFFFFFFFFFULL;
-  out_event.tof = static_cast<double>(raw_tof) * kTofScale;
+  const uint64_t raw_time = word & 0x00FFFFFFFFFFFFFFULL;
+  out_event.time = static_cast<double>(raw_time) * kTimeScale;
   return true;
 }
 
@@ -65,7 +65,7 @@ std::vector<TreeBranchDef> Kc705TofDecoder::TreeBranches() const {
       {"raw_word", TreeValueType::kU64},
       {"board_id", TreeValueType::kU64},
       {"channel_id", TreeValueType::kU64},
-      {"tof", TreeValueType::kF64},
+      {"time", TreeValueType::kF64},
   };
 }
 
@@ -82,7 +82,7 @@ bool Kc705TofDecoder::DecodedToTreeValues(const DecodedMessage& message,
   out_values.push_back(TreeValue::FromU64(Event.raw_word));
   out_values.push_back(TreeValue::FromU64(static_cast<uint64_t>(Event.board_id)));
   out_values.push_back(TreeValue::FromU64(static_cast<uint64_t>(Event.channel_id)));
-  out_values.push_back(TreeValue::FromF64(static_cast<double>(Event.tof)));
+  out_values.push_back(TreeValue::FromF64(static_cast<double>(Event.time)));
   return true;
 }
 
@@ -94,7 +94,7 @@ bool Kc705TofDecoder::FormatDecoded(const DecodedMessage& message, std::string& 
 
   std::ostringstream oss;
   oss << "board=" << static_cast<unsigned>(Event.board_id) << " ch=" << static_cast<unsigned>(Event.channel_id)
-      << " tof=" << Event.tof;
+      << " time=" << Event.time;
   out_text = oss.str();
   return true;
 }

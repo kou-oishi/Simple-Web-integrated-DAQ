@@ -13,5 +13,5 @@ struct Kc705TofEvent : public DecodedEventBase {
   uint64_t raw_word = 0;
   uint8_t board_id = 0;
   uint8_t channel_id = 0;
-  Double_t tof = 0.0;
+  Double_t time = 0.0;
 };

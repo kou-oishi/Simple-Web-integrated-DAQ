@@ -17,13 +17,17 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
   explicit Kc705TofOverviewAnalysis(std::size_t trend_points);
 
   bool Initialise(std::string& error_text) override;
+  bool BeginOfRun(uint32_t run_number, std::string& error_text) override;
+  bool EndOfRun(uint32_t run_number, std::string& error_text) override;
+  bool UpdateDrawables(std::string& error_text) override;
   bool Finalise(std::string& error_text) override;
 
  private:
   bool Event(const Kc705TofEvent& Event, std::string& error_text) override;
 
   std::size_t trend_points_ = 1000;
-
+  Double_t min_time_ = 1e100, max_time_ = -1e100;
+  
   std::unique_ptr<TCanvas> canvas_board_;
   std::unique_ptr<TCanvas> canvas_channel_;
   std::unique_ptr<TCanvas> canvas_trend_;

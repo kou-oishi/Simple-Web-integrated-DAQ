@@ -106,21 +106,27 @@ def _resolve_bin_executable(config_key: str, env_key: str, default_path: Path, e
 
 
 def _resolve_daqd_log_path() -> Path:
-    configured = (
-        WEB_CONFIG.get("daqd_log_path")
-        or os.getenv("SIMPLEDAQ_DAQD_LOG")
-        or DEFAULTS.get("kDaqdLogPath")
-        or "logs/daqd.log"
-    )
-    return _resolve_repo_path(str(configured))
+    configured = WEB_CONFIG.get("daqd_log_path") or os.getenv("SIMPLEDAQ_DAQD_LOG")
+    if configured:
+        return _resolve_repo_path(str(configured))
+    log_dir = WEB_CONFIG.get("log_path")
+    if log_dir:
+        return _resolve_repo_path(str(log_dir)) / "daqd.log"
+    configured_default = DEFAULTS.get("kDaqdLogPath") or "logs/daqd.log"
+    return _resolve_repo_path(str(configured_default))
 
 
 DAQD_LOG_PATH = _resolve_daqd_log_path()
 
 
 def _resolve_datamon_log_path() -> Path:
-    configured = WEB_CONFIG.get("datamon_log_path") or os.getenv("SIMPLEDAQ_DATAMON_LOG") or "logs/datamon.log"
-    return _resolve_repo_path(str(configured))
+    configured = WEB_CONFIG.get("datamon_log_path") or os.getenv("SIMPLEDAQ_DATAMON_LOG")
+    if configured:
+        return _resolve_repo_path(str(configured))
+    log_dir = WEB_CONFIG.get("log_path")
+    if log_dir:
+        return _resolve_repo_path(str(log_dir)) / "datamon.log"
+    return _resolve_repo_path("logs/datamon.log")
 
 
 DATAMON_LOG_PATH = _resolve_datamon_log_path()

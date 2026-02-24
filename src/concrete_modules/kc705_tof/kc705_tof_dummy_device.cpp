@@ -5,6 +5,7 @@
 #include <csignal>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <getopt.h>
 #include <iostream>
 #include <limits>
@@ -35,21 +36,21 @@ struct Config {
   uint8_t channel_min = 0;
   uint8_t channel_max = 0;
   uint16_t port = 9000;
-  uint32_t interval_ms = 1000;
+  double rate_hz = 1.0;
   std::string bind_addr = "0.0.0.0";
 };
 
 void print_usage(const char* prog) {
   std::cerr << "Usage: " << prog
             << " --board-id <0-7> (--channel-id <0-31> | --channel-min <0-31> --channel-max <0-31>) [--port <1-65535>]"
-            << " [--interval-ms <>=1>] [--bind <IPv4>]\n";
+            << " [--rate-hz <float> >0] [--bind <IPv4>]\n";
   std::cerr << "Options:\n";
   std::cerr << "  -b, --board-id <0-7>       Board ID to encode in outgoing frames (required)\n";
   std::cerr << "  -c, --channel-id <0-31>    Fixed channel ID (mutually exclusive with range options)\n";
   std::cerr << "  -m, --channel-min <0-31>   Minimum channel ID for random range mode\n";
   std::cerr << "  -x, --channel-max <0-31>   Maximum channel ID for random range mode\n";
   std::cerr << "  -p, --port <1-65535>       TCP listen port (default: 9000)\n";
-  std::cerr << "  -i, --interval-ms <n>      Send interval in milliseconds (default: 1000)\n";
+  std::cerr << "  -r, --rate-hz <float>      Mean event rate [/s] for Poisson timing (default: 1.0)\n";
   std::cerr << "  -B, --bind <IPv4>          Bind address (default: 0.0.0.0)\n";
   std::cerr << "  -h, --help                 Show this help\n";
 }
@@ -68,6 +69,17 @@ bool parse_u32(const std::string& s, uint32_t& out) {
   }
 }
 
+bool parse_f64(const std::string& s, double& out) {
+  char* end = nullptr;
+  errno = 0;
+  const double v = std::strtod(s.c_str(), &end);
+  if (errno != 0 || end == nullptr || *end != '\0') {
+    return false;
+  }
+  out = v;
+  return true;
+}
+
 bool parse_args(int argc, char** argv, Config& cfg) {
   bool has_board = false;
   bool has_channel_id = false;
@@ -80,7 +92,7 @@ bool parse_args(int argc, char** argv, Config& cfg) {
       {"channel-min", required_argument, nullptr, 'm'},
       {"channel-max", required_argument, nullptr, 'x'},
       {"port", required_argument, nullptr, 'p'},
-      {"interval-ms", required_argument, nullptr, 'i'},
+      {"rate-hz", required_argument, nullptr, 'r'},
       {"bind", required_argument, nullptr, 'B'},
       {"help", no_argument, nullptr, 'h'},
       {nullptr, 0, nullptr, 0},
@@ -89,7 +101,7 @@ bool parse_args(int argc, char** argv, Config& cfg) {
   optind = 1;
   opterr = 0;
   while (true) {
-    const int c = ::getopt_long(argc, argv, ":b:c:m:x:p:i:B:h", kLongOpts, nullptr);
+    const int c = ::getopt_long(argc, argv, ":b:c:m:x:p:r:B:h", kLongOpts, nullptr);
     if (c == -1) {
       break;
     }
@@ -144,13 +156,13 @@ bool parse_args(int argc, char** argv, Config& cfg) {
       cfg.port = static_cast<uint16_t>(tmp);
       break;
     }
-    case 'i': {
-      uint32_t tmp = 0;
-      if (!parse_u32(optarg, tmp) || tmp == 0) {
-        std::cerr << "Invalid --interval-ms: " << optarg << " (expected >=1)\n";
+    case 'r': {
+      double tmp = 0.0;
+      if (!parse_f64(optarg, tmp) || !(tmp > 0.0)) {
+        std::cerr << "Invalid --rate-hz: " << optarg << " (expected >0)\n";
         return false;
       }
-      cfg.interval_ms = tmp;
+      cfg.rate_hz = tmp;
       break;
     }
     case 'B':
@@ -269,7 +281,9 @@ int main(int argc, char** argv) {
               << " (board=" << static_cast<int>(cfg.board_id)
               << ", channel=[" << static_cast<int>(cfg.channel_min) << ".."
               << static_cast<int>(cfg.channel_max) << "]"
-              << ", interval_ms=" << cfg.interval_ms << ")\n";
+              << ", rate_hz=" << cfg.rate_hz << ")\n";
+
+    const auto start_time = std::chrono::steady_clock::now();
 
     while (g_running) {
       sockaddr_in peer{};
@@ -288,11 +302,13 @@ int main(int argc, char** argv) {
       std::cout << "Client connected: " << peer_ip << ":" << ntohs(peer.sin_port) << "\n";
 
       std::mt19937_64 rng(std::random_device{}());
-      std::uniform_int_distribution<uint64_t> value_dist(0, 0x00FFFFFFFFFFFFFFULL);
       std::uniform_int_distribution<uint32_t> channel_dist(cfg.channel_min, cfg.channel_max);
+      std::exponential_distribution<double> inter_arrival_dist(cfg.rate_hz);
 
       while (g_running) {
-        const uint64_t data56 = value_dist(rng);
+        const auto now = std::chrono::steady_clock::now();
+        const auto elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now - start_time).count();
+        const uint64_t data56 = (elapsed_ns <= 0) ? 0ULL : (static_cast<uint64_t>(elapsed_ns) / 4ULL);
         const uint8_t channel_id = static_cast<uint8_t>(channel_dist(rng));
         const uint64_t word = build_word(cfg.board_id, channel_id, data56);
         std::array<uint8_t, 12> wire{};
@@ -309,7 +325,10 @@ int main(int argc, char** argv) {
           break;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(cfg.interval_ms));
+        const double wait_sec = inter_arrival_dist(rng);
+        if (wait_sec > 0.0) {
+          std::this_thread::sleep_for(std::chrono::duration<double>(wait_sec));
+        }
       }
 
       ::close(client_fd);

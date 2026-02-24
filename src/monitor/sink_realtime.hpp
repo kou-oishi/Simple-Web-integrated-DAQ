@@ -46,8 +46,11 @@ class RealtimeAnalysisSink : public IEventSink {
   };
 
   bool EnsureInitialised(std::string& error_text);
-  void RedrawAll();
-  void PumpGui();
+  bool BeginRun(uint32_t run_number, std::string& error_text);
+  bool EndRun(uint32_t run_number, std::string& error_text);
+  bool RedrawAll(std::string& error_text);
+  bool PumpGui(std::string& error_text);
+  bool UpdateAnalysesForDraw(std::string& error_text);
   void SaveSnapshots();
   void PollSelectedAnalysisControl();
   bool InitialiseSelectedAnalysisControl(std::string& error_text);
@@ -57,6 +60,8 @@ class RealtimeAnalysisSink : public IEventSink {
   std::vector<std::string> analysis_names_;
   bool initialised_ = false;
   bool finalised_ = false;
+  bool has_active_run_ = false;
+  uint32_t active_run_number_ = 0;
   bool enable_gui_ = true;
   uint32_t gui_update_interval_ms_ = 50;
   std::string snapshot_dir_;

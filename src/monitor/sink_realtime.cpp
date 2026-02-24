@@ -144,7 +144,9 @@ bool RealtimeAnalysisSink::EnsureInitialised(std::string& error_text) {
   }
   current_analysis_name_.clear();
 
-  RedrawAll();
+  if (!RedrawAll(error_text)) {
+    return false;
+  }
   if (enable_gui_) {
     gSystem->ProcessEvents();
   }
@@ -157,8 +159,44 @@ bool RealtimeAnalysisSink::EnsureInitialised(std::string& error_text) {
 #endif
 }
 
-void RealtimeAnalysisSink::RedrawAll() {
+bool RealtimeAnalysisSink::BeginRun(uint32_t run_number, std::string& error_text) {
+  error_text.clear();
+  for (auto& analysis : analyses_) {
+    if (!analysis->BeginOfRun(run_number, error_text)) {
+      return false;
+    }
+  }
+  has_active_run_ = true;
+  active_run_number_ = run_number;
+  return true;
+}
+
+bool RealtimeAnalysisSink::EndRun(uint32_t run_number, std::string& error_text) {
+  error_text.clear();
+  for (auto& analysis : analyses_) {
+    if (!analysis->EndOfRun(run_number, error_text)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool RealtimeAnalysisSink::UpdateAnalysesForDraw(std::string& error_text) {
+  error_text.clear();
+  for (auto& analysis : analyses_) {
+    if (!analysis->UpdateDrawables(error_text)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool RealtimeAnalysisSink::RedrawAll(std::string& error_text) {
+  error_text.clear();
 #if defined(SIMPLEDAQ_HAS_ROOT) && SIMPLEDAQ_HAS_ROOT
+  if (!UpdateAnalysesForDraw(error_text)) {
+    return false;
+  }
   for (const auto& binding : drawables_) {
     const auto* graph = dynamic_cast<const TGraph*>(binding.object);
     if (graph != nullptr && graph->GetN() <= 0) {
@@ -170,26 +208,40 @@ void RealtimeAnalysisSink::RedrawAll() {
     binding.pad->Update();
   }
 #endif
+  return true;
 }
 
-void RealtimeAnalysisSink::PumpGui() {
+bool RealtimeAnalysisSink::PumpGui(std::string& error_text) {
+  error_text.clear();
 #if defined(SIMPLEDAQ_HAS_ROOT) && SIMPLEDAQ_HAS_ROOT
   const auto now = std::chrono::steady_clock::now();
   const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_gui_update_).count();
-  if (elapsed_ms >= static_cast<long long>(gui_update_interval_ms_)) {
-    RedrawAll();
+  const bool gui_due = elapsed_ms >= static_cast<long long>(gui_update_interval_ms_);
+  const auto snapshot_elapsed_ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(now - last_snapshot_update_).count();
+  const bool snapshot_due = !snapshot_dir_.empty() && snapshot_elapsed_ms >= static_cast<long long>(snapshot_interval_ms_);
+
+  if (!snapshot_dir_.empty()) {
+    PollSelectedAnalysisControl();
+  }
+  const bool snapshot_selected = !selected_analysis_name_.empty();
+  const bool redraw_due = (enable_gui_ && gui_due) || (snapshot_due && snapshot_selected);
+
+  if (redraw_due && !RedrawAll(error_text)) {
+    return false;
+  }
+  if (gui_due) {
     last_gui_update_ = now;
   }
   if (enable_gui_) {
     gSystem->ProcessEvents();
   }
-  const auto snapshot_elapsed_ms =
-      std::chrono::duration_cast<std::chrono::milliseconds>(now - last_snapshot_update_).count();
-  if (!snapshot_dir_.empty() && snapshot_elapsed_ms >= static_cast<long long>(snapshot_interval_ms_)) {
+  if (snapshot_due) {
     SaveSnapshots();
     last_snapshot_update_ = now;
   }
 #endif
+  return true;
 }
 
 std::string RealtimeAnalysisSink::SanitisePathPart(const std::string& text) const {
@@ -319,14 +371,26 @@ bool RealtimeAnalysisSink::Consume(const DecodedMessage& message, std::string& e
     return false;
   }
 
+  if (!has_active_run_) {
+    if (!BeginRun(message.run_number, error_text)) {
+      return false;
+    }
+  } else if (message.run_number != active_run_number_) {
+    if (!EndRun(active_run_number_, error_text)) {
+      return false;
+    }
+    if (!BeginRun(message.run_number, error_text)) {
+      return false;
+    }
+  }
+
   error_text.clear();
   for (auto& analysis : analyses_) {
     if (!analysis->Event(message, error_text)) {
       return false;
     }
   }
-  PumpGui();
-  return true;
+  return PumpGui(error_text);
 }
 
 bool RealtimeAnalysisSink::Finalise(std::string& error_text) {
@@ -338,6 +402,13 @@ bool RealtimeAnalysisSink::Finalise(std::string& error_text) {
 
   if (!EnsureInitialised(error_text)) {
     return false;
+  }
+
+  if (has_active_run_) {
+    if (!EndRun(active_run_number_, error_text)) {
+      return false;
+    }
+    has_active_run_ = false;
   }
 
   for (auto& analysis : analyses_) {
@@ -353,7 +424,9 @@ bool RealtimeAnalysisSink::Finalise(std::string& error_text) {
   }
 
 #if defined(SIMPLEDAQ_HAS_ROOT) && SIMPLEDAQ_HAS_ROOT
-  RedrawAll();
+  if (!RedrawAll(error_text)) {
+    return false;
+  }
   if (enable_gui_) {
     gSystem->ProcessEvents();
   }
