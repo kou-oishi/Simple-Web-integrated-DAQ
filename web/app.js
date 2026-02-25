@@ -149,6 +149,16 @@ function saveDevicesState() {
   }
 }
 
+function clearSavedMainSetupState() {
+  try {
+    window.localStorage.removeItem(MAIN_FORM_STATE_KEY);
+    window.localStorage.removeItem(MONITOR_STATE_KEY);
+    window.localStorage.removeItem(DEVICES_STATE_KEY);
+  } catch (_) {
+    // ignore storage failures
+  }
+}
+
 function setActionButtonsByState(state, running) {
   const btnStart = document.getElementById('btn_start');
   const btnPause = document.getElementById('btn_pause');
@@ -508,7 +518,8 @@ async function setSelectedAnalysis(moduleName) {
   }
 }
 
-async function loadUiConfig() {
+async function loadUiConfig(options = {}) {
+  const preferSavedState = options.preferSavedState !== false;
   uiConfig = await callApi('/api/ui-config');
   const title = String(uiConfig.title || 'DAQ Control');
   document.title = title;
@@ -537,7 +548,7 @@ async function loadUiConfig() {
   if (uiConfig.datamon_snapshot_interval_sec !== undefined && monitorSnapshotIntervalInput) {
     monitorSnapshotIntervalInput.value = String(Number(uiConfig.datamon_snapshot_interval_sec));
   }
-  const saved = loadMainFormState();
+  const saved = preferSavedState ? loadMainFormState() : null;
   if (saved) {
     if (eventsPerFileInput && saved.events_per_file !== undefined) {
       eventsPerFileInput.value = String(saved.events_per_file);
@@ -558,7 +569,7 @@ async function loadUiConfig() {
   runLogLimit = Number(uiConfig.main_run_log_limit || 50);
   selectedMonitorDecoder = String(uiConfig.datamon_decoder || '').trim();
   selectedMonitorAnalyses = new Set(Array.isArray(uiConfig.datamon_analyses) ? uiConfig.datamon_analyses.map((x) => String(x)) : []);
-  const monitorSaved = loadMonitorState();
+  const monitorSaved = preferSavedState ? loadMonitorState() : null;
   if (monitorSaved) {
     if (monitorSaved.decoder !== undefined) {
       selectedMonitorDecoder = String(monitorSaved.decoder || '').trim();
@@ -576,12 +587,26 @@ async function loadUiConfig() {
   if (Array.isArray(uiConfig.devices)) {
     deviceEntries = uiConfig.devices.slice();
   }
-  const savedDevices = loadDevicesState();
+  const savedDevices = preferSavedState ? loadDevicesState() : null;
   if (savedDevices) {
     deviceEntries = savedDevices;
   }
   if (Array.isArray(deviceEntries)) {
     renderDeviceTable();
+  }
+}
+
+async function reloadDefaultSetup() {
+  try {
+    const data = await callApi('/api/ui-config/reload', 'POST');
+    clearSavedMainSetupState();
+    await loadUiConfig({ preferSavedState: false });
+    await loadMonitorModules();
+    await refreshWholeUi();
+    const path = (data && data.config_path) ? ` (${data.config_path})` : '';
+    setMessage(`default setup reloaded${path}`, true);
+  } catch (e) {
+    setMessage(`failed to reload default setup: ${e.message}`, false);
   }
 }
 
@@ -901,6 +926,7 @@ document.getElementById('btn_shutdown').addEventListener('click', async () => {
 document.getElementById('btn_start_datamon').addEventListener('click', startDatamonFromWeb);
 document.getElementById('btn_shutdown_datamon').addEventListener('click', stopDatamonFromWeb);
 document.getElementById('btn_refresh_status').addEventListener('click', refreshStatus);
+document.getElementById('btn_reload_default_setup').addEventListener('click', reloadDefaultSetup);
 document.getElementById('btn_refresh_runlog').addEventListener('click', refreshRunLog);
 document.getElementById('btn_refresh_daqd_log').addEventListener('click', refreshDaqdLog);
 document.getElementById('btn_refresh_datamon_log').addEventListener('click', refreshDatamonLog);

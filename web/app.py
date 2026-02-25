@@ -40,6 +40,7 @@ _DATAMON_ACTIVE_DECODER: dict[str, str] | None = None
 _DATAMON_ACTIVE_ANALYSES: list[dict[str, str]] = []
 _DATAMON_SELECTED_ANALYSIS = ""
 _MONITOR_CTRL_LOCK = threading.Lock()
+_CONFIG_LOCK = threading.Lock()
 
 
 def _load_defaults() -> dict[str, str]:
@@ -66,15 +67,25 @@ def _load_defaults() -> dict[str, str]:
 DEFAULTS = _load_defaults()
 
 
-def _load_web_config() -> dict[str, Any]:
-    cfg_path = Path(os.getenv("SIMPLEDAQ_WEB_CONFIG", str(DEFAULT_WEB_CONFIG))).expanduser()
+def _web_config_path() -> Path:
+    return Path(os.getenv("SIMPLEDAQ_WEB_CONFIG", str(DEFAULT_WEB_CONFIG))).expanduser()
+
+
+def _load_web_config(strict: bool = False) -> dict[str, Any]:
+    cfg_path = _web_config_path()
     if not cfg_path.exists():
+        if strict:
+            raise RuntimeError(f"web config file does not exist: {cfg_path}")
         return {}
     try:
         loaded = json.loads(cfg_path.read_text(encoding="utf-8"))
-    except Exception:
+    except Exception as ex:
+        if strict:
+            raise RuntimeError(f"failed to read web config '{cfg_path}': {ex}") from ex
         return {}
     if not isinstance(loaded, dict):
+        if strict:
+            raise RuntimeError(f"web config root must be object: {cfg_path}")
         return {}
     return loaded
 
@@ -145,6 +156,24 @@ def _resolve_datamon_state_path() -> Path:
 
 
 DATAMON_STATE_PATH = _resolve_datamon_state_path()
+
+
+def _reload_web_config() -> tuple[Path, dict[str, Any]]:
+    global WEB_CONFIG
+    global DAQD_LOG_PATH
+    global DATAMON_LOG_PATH
+    global SNAPSHOT_SELECT_ENDPOINT
+    global DATAMON_STATE_PATH
+
+    cfg_path = _web_config_path().resolve()
+    loaded = _load_web_config(strict=True)
+    with _CONFIG_LOCK:
+        WEB_CONFIG = loaded
+        DAQD_LOG_PATH = _resolve_daqd_log_path()
+        DATAMON_LOG_PATH = _resolve_datamon_log_path()
+        SNAPSHOT_SELECT_ENDPOINT = _resolve_snapshot_select_endpoint()
+        DATAMON_STATE_PATH = _resolve_datamon_state_path()
+    return cfg_path, WEB_CONFIG
 
 
 def _run_cmd(args: list[str], timeout_sec: int = 30) -> tuple[int, str, str]:
@@ -988,6 +1017,19 @@ def get_ui_config() -> dict[str, Any]:
         "reconnect_failure_timeout_sec": reconnect_failure_timeout_sec,
         "allow_partial_run_on_runtime_disconnect": allow_partial_run_on_runtime_disconnect,
         "devices": devices,
+    }
+
+
+@app.post("/api/ui-config/reload")
+def reload_ui_config() -> dict[str, Any]:
+    try:
+        cfg_path, loaded = _reload_web_config()
+    except RuntimeError as ex:
+        raise HTTPException(status_code=400, detail={"error": str(ex)}) from ex
+    return {
+        "result": "web config reloaded",
+        "config_path": str(cfg_path),
+        "keys": sorted(list(loaded.keys())),
     }
 
 
