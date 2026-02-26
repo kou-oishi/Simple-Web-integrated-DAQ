@@ -168,6 +168,20 @@ bool RealtimeAnalysisSink::BeginRun(uint32_t run_number, std::string& error_text
   }
   has_active_run_ = true;
   active_run_number_ = run_number;
+#if defined(SIMPLEDAQ_HAS_ROOT) && SIMPLEDAQ_HAS_ROOT
+  // Force one immediate refresh at run start so UI snapshots reflect BeginOfRun state
+  // without waiting for the periodic snapshot timer.
+  if (!RedrawAll(error_text)) {
+    return false;
+  }
+  if (enable_gui_) {
+    gSystem->ProcessEvents();
+  }
+  SaveSnapshots();
+  const auto now = std::chrono::steady_clock::now();
+  last_gui_update_ = now;
+  last_snapshot_update_ = now;
+#endif
   return true;
 }
 

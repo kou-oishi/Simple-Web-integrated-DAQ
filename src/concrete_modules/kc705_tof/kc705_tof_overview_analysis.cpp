@@ -85,19 +85,21 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
 
 bool Kc705TofOverviewAnalysis::BeginOfRun(uint32_t run_number, std::string& error_text) {
   error_text.clear();
-  return true;
-}
-
-bool Kc705TofOverviewAnalysis::EndOfRun(uint32_t run_number, std::string& error_text) {
-  error_text.clear();
-
+  
   hist_board_->Reset();
   hist_channel_->Reset();
   for (auto& hist_tof : hist_tofs_) {
     hist_tof->Reset();
   }
   graph_trend_->Set(0);
+  min_time_ = 1e100;
+  max_time_ = -1e100;
+  
+  return true;
+}
 
+bool Kc705TofOverviewAnalysis::EndOfRun(uint32_t run_number, std::string& error_text) {
+  error_text.clear();
   return true;
 }
 
@@ -123,7 +125,11 @@ bool Kc705TofOverviewAnalysis::Event(const Kc705TofEvent& Event, std::string& er
 
 bool Kc705TofOverviewAnalysis::UpdateDrawables(std::string& error_text) {
   error_text.clear();
-  
+
+  if (max_time_ < min_time_) {
+    return true;
+  }
+
   Double_t margin = 0.1 * (max_time_ - min_time_);
   for(auto& hist_tof : hist_tofs_) {
     hist_tof->GetXaxis()->SetRangeUser(min_time_ - margin, max_time_ + margin);

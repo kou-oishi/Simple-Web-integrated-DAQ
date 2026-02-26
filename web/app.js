@@ -38,6 +38,7 @@ let msgSource = '';
 let daqState = '-';
 let runLogLimit = 50;
 let monitorRunning = false;
+const STATUS_API_TIMEOUT_MS = 1500;
 const MAIN_FORM_STATE_KEY = 'simpledaq_main_form_state_v1';
 const MONITOR_STATE_KEY = 'simpledaq_monitor_state_v1';
 const DEVICES_STATE_KEY = 'simpledaq_devices_state_v1';
@@ -495,13 +496,37 @@ function parseApiError(data, status) {
   return JSON.stringify(detail);
 }
 
-async function callApi(path, method = 'GET', payload = null) {
+async function callApi(path, method = 'GET', payload = null, options = {}) {
+  const timeoutMsRaw = Number(options && options.timeoutMs ? options.timeoutMs : 0);
+  const timeoutMs = Number.isFinite(timeoutMsRaw) ? Math.max(0, Math.floor(timeoutMsRaw)) : 0;
+  const controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
   const opt = { method, headers: {} };
   if (payload !== null) {
     opt.headers['Content-Type'] = 'application/json';
     opt.body = JSON.stringify(payload);
   }
-  const res = await fetch(path, opt);
+  if (controller) {
+    opt.signal = controller.signal;
+  }
+  let timeoutId = null;
+  if (timeoutMs > 0) {
+    timeoutId = window.setTimeout(() => {
+      if (controller) controller.abort();
+    }, timeoutMs);
+  }
+  let res;
+  try {
+    res = await fetch(path, opt);
+  } catch (e) {
+    if (timeoutMs > 0 && e && e.name === 'AbortError') {
+      throw new Error(`request timeout after ${timeoutMs}ms`);
+    }
+    throw e;
+  } finally {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId);
+    }
+  }
   let data = null;
   try { data = await res.json(); } catch (_) {}
   if (!res.ok) {
@@ -774,7 +799,7 @@ async function refreshStatus() {
   }
   statusPollInFlight = true;
   try {
-    const data = await callApi('/api/status');
+    const data = await callApi('/api/status', 'GET', null, { timeoutMs: STATUS_API_TIMEOUT_MS });
     setDaqConnection(true);
     await renderStatus(data);
     clearConnectionErrorMessageIfAny();
