@@ -49,6 +49,20 @@ const char* to_string(ValidationResult::Status s) {
   return "unknown";
 }
 
+const char* to_string(ReadStatus s) {
+  switch (s) {
+    case ReadStatus::kOk:
+      return "kOk";
+    case ReadStatus::kTimeout:
+      return "kTimeout";
+    case ReadStatus::kDisconnected:
+      return "kDisconnected";
+    case ReadStatus::kError:
+      return "kError";
+  }
+  return "unknown";
+}
+
 std::string device_label(const DeviceSpec& spec) {
   return spec.frontend + "#" + std::to_string(static_cast<unsigned>(spec.board_id)) + "@" + spec.host + ":" +
          std::to_string(spec.port);
@@ -68,6 +82,10 @@ void run_worker(const DeviceSpec& spec,
                 std::vector<std::atomic<bool>>& connected_once,
                 std::atomic<uint32_t>& connected_count,
                 std::atomic<bool>& startup_completed,
+                std::vector<std::atomic<bool>>& currently_connected,
+                std::atomic<uint32_t>& currently_connected_count,
+                std::vector<std::atomic<bool>>& received_frame_once,
+                std::atomic<uint32_t>& received_frame_count,
                 std::vector<std::atomic<bool>>& worker_marked_dead,
                 std::atomic<uint32_t>& alive_worker_count,
                 std::vector<std::atomic<uint64_t>>& disconnect_event_count,
@@ -100,6 +118,9 @@ void run_worker(const DeviceSpec& spec,
 
   while (running.load() && stop_requested == 0) {
     if (!driver->ConnectDevice()) {
+      if (currently_connected[worker_index].exchange(false)) {
+        currently_connected_count.fetch_sub(1);
+      }
       if (!worker_marked_dead[worker_index].load()) {
         log_line("[WARN] Connect failed: " + device_label(spec));
       }
@@ -136,8 +157,8 @@ void run_worker(const DeviceSpec& spec,
           reconnect_window_active = true;
           reconnect_deadline = now + std::chrono::seconds(cfg.reconnect_failure_timeout_sec);
         } else if (now >= reconnect_deadline) {
-          const bool startup_completed = connected_count.load() == connected_once.size();
-          if (cfg.allow_partial_run_on_runtime_disconnect && startup_completed) {
+          const bool startup_done = startup_completed.load();
+          if (cfg.allow_partial_run_on_runtime_disconnect && startup_done) {
             bool switched_to_degraded = false;
             uint32_t alive_now = alive_worker_count.load();
             while (alive_now > 1) {
@@ -191,17 +212,12 @@ void run_worker(const DeviceSpec& spec,
     }
 
     reconnect_window_active = false;
+    if (!currently_connected[worker_index].exchange(true)) {
+      (void)currently_connected_count.fetch_add(1);
+    }
 
     if (!connected_once[worker_index].exchange(true)) {
-      const uint32_t n = connected_count.fetch_add(1) + 1;
-      if (n == connected_once.size()) {
-        startup_completed.store(true);
-        std::call_once(startup_notify_once, [&]() {
-          if (on_startup_status) {
-            on_startup_status(true, "all devices connected");
-          }
-        });
-      }
+      (void)connected_count.fetch_add(1);
     }
 
     if (worker_marked_dead[worker_index].exchange(false)) {
@@ -219,10 +235,33 @@ void run_worker(const DeviceSpec& spec,
       const ReadStatus st = driver->ReadBytes(
           chunk, daq_defaults::kReadChunkSizeBytes, static_cast<int>(cfg.read_timeout_ms));
       if (st == ReadStatus::kTimeout) {
+        if (!received_frame_once[worker_index].load() &&
+            std::chrono::steady_clock::now() >= startup_deadline) {
+          const std::string msg = "startup failed: no data from " + device_label(spec);
+          log_line("[ERROR] " + msg);
+          startup_failed.store(true);
+          std::call_once(startup_notify_once, [&]() {
+            if (on_startup_status) {
+              on_startup_status(false, msg);
+            }
+          });
+          running.store(false);
+          queue.Close();
+          return;
+        }
         continue;
       }
       if (st != ReadStatus::kOk) {
-        log_line("[WARN] disconnected/read-error: " + device_label(spec));
+        std::string detail = driver->LastErrorDetail();
+        if (detail.empty()) {
+          detail = "(no detail)";
+        }
+        log_line("[WARN] disconnected/read-error: " + device_label(spec) +
+                 " status=" + std::string(to_string(st)) +
+                 " detail=" + detail);
+        if (currently_connected[worker_index].exchange(false)) {
+          currently_connected_count.fetch_sub(1);
+        }
         driver->DisconnectDevice();
         validator->Reset();
         if (connected_once[worker_index].load() && !startup_completed.load()) {
@@ -272,6 +311,18 @@ void run_worker(const DeviceSpec& spec,
       }
 
       for (auto& frame : frames) {
+        if (!received_frame_once[worker_index].exchange(true)) {
+          const uint32_t n = received_frame_count.fetch_add(1) + 1;
+          if (n == received_frame_once.size() &&
+              currently_connected_count.load() == currently_connected.size()) {
+            startup_completed.store(true);
+            std::call_once(startup_notify_once, [&]() {
+              if (on_startup_status) {
+                on_startup_status(true, "all devices connected and receiving data");
+              }
+            });
+          }
+        }
         FrameRecord rec;
         rec.source = "board" + std::to_string(static_cast<unsigned>(spec.board_id));
         rec.payload = std::move(frame);
@@ -282,6 +333,9 @@ void run_worker(const DeviceSpec& spec,
     }
   }
 
+  if (currently_connected[worker_index].exchange(false)) {
+    currently_connected_count.fetch_sub(1);
+  }
   driver->DisconnectDevice();
 }
 
@@ -544,6 +598,16 @@ int RunDaqCore(const DaqConfig& cfg,
   }
   std::atomic<uint32_t> connected_count{0};
   std::atomic<bool> startup_completed{false};
+  std::vector<std::atomic<bool>> currently_connected(effective_cfg.devices.size());
+  for (size_t i = 0; i < currently_connected.size(); ++i) {
+    currently_connected[i].store(false);
+  }
+  std::atomic<uint32_t> currently_connected_count{0};
+  std::vector<std::atomic<bool>> received_frame_once(effective_cfg.devices.size());
+  for (size_t i = 0; i < received_frame_once.size(); ++i) {
+    received_frame_once[i].store(false);
+  }
+  std::atomic<uint32_t> received_frame_count{0};
   std::vector<std::atomic<bool>> worker_marked_dead(effective_cfg.devices.size());
   for (size_t i = 0; i < worker_marked_dead.size(); ++i) {
     worker_marked_dead[i].store(false);
@@ -597,6 +661,10 @@ int RunDaqCore(const DaqConfig& cfg,
                  connected_once,
                  connected_count,
                  startup_completed,
+                 currently_connected,
+                 currently_connected_count,
+                 received_frame_once,
+                 received_frame_count,
                  worker_marked_dead,
                  alive_worker_count,
                  disconnect_event_count,

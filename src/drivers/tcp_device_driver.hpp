@@ -23,6 +23,7 @@ class TcpDeviceDriver : public IDeviceDriver {
   bool ConnectDevice() override;
   void DisconnectDevice() override;
   ReadStatus ReadBytes(std::vector<uint8_t>& out_bytes, size_t max_bytes, int timeout_ms) override;
+  std::string LastErrorDetail() const override;
 
  private:
   static bool IsLittleEndianHost();
@@ -33,6 +34,8 @@ class TcpDeviceDriver : public IDeviceDriver {
   EndianMode endian_mode_;
   std::size_t network_word_bytes_;
   int sock_fd_;
+  std::size_t consecutive_timeouts_;
+  std::string last_error_detail_;
   std::vector<uint8_t> pending_network_bytes_;
   std::vector<uint8_t> converted_host_bytes_;
 };
