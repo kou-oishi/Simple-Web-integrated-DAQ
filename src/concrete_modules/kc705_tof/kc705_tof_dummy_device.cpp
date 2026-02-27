@@ -38,12 +38,13 @@ struct Config {
   uint16_t port = 9000;
   double rate_hz = 1.0;
   std::string bind_addr = "0.0.0.0";
+  bool no_data = false;
 };
 
 void print_usage(const char* prog) {
   std::cerr << "Usage: " << prog
             << " --board-id <0-7> (--channel-id <0-31> | --channel-min <0-31> --channel-max <0-31>) [--port <1-65535>]"
-            << " [--rate-hz <float> >0] [--bind <IPv4>]\n";
+            << " [--rate-hz <float> >0] [--bind <IPv4>] [--no-data]\n";
   std::cerr << "Options:\n";
   std::cerr << "  -b, --board-id <0-7>       Board ID to encode in outgoing frames (required)\n";
   std::cerr << "  -c, --channel-id <0-31>    Fixed channel ID (mutually exclusive with range options)\n";
@@ -52,6 +53,7 @@ void print_usage(const char* prog) {
   std::cerr << "  -p, --port <1-65535>       TCP listen port (default: 9000)\n";
   std::cerr << "  -r, --rate-hz <float>      Mean event rate [/s] for Poisson timing (default: 1.0)\n";
   std::cerr << "  -B, --bind <IPv4>          Bind address (default: 0.0.0.0)\n";
+  std::cerr << "  -n, --no-data              Accept TCP connection but do not send any frame\n";
   std::cerr << "  -h, --help                 Show this help\n";
 }
 
@@ -94,6 +96,7 @@ bool parse_args(int argc, char** argv, Config& cfg) {
       {"port", required_argument, nullptr, 'p'},
       {"rate-hz", required_argument, nullptr, 'r'},
       {"bind", required_argument, nullptr, 'B'},
+      {"no-data", no_argument, nullptr, 'n'},
       {"help", no_argument, nullptr, 'h'},
       {nullptr, 0, nullptr, 0},
   };
@@ -101,7 +104,7 @@ bool parse_args(int argc, char** argv, Config& cfg) {
   optind = 1;
   opterr = 0;
   while (true) {
-    const int c = ::getopt_long(argc, argv, ":b:c:m:x:p:r:B:h", kLongOpts, nullptr);
+    const int c = ::getopt_long(argc, argv, ":b:c:m:x:p:r:B:nh", kLongOpts, nullptr);
     if (c == -1) {
       break;
     }
@@ -167,6 +170,9 @@ bool parse_args(int argc, char** argv, Config& cfg) {
     }
     case 'B':
       cfg.bind_addr = optarg;
+      break;
+    case 'n':
+      cfg.no_data = true;
       break;
     case 'h':
       print_usage(argv[0]);
@@ -281,7 +287,8 @@ int main(int argc, char** argv) {
               << " (board=" << static_cast<int>(cfg.board_id)
               << ", channel=[" << static_cast<int>(cfg.channel_min) << ".."
               << static_cast<int>(cfg.channel_max) << "]"
-              << ", rate_hz=" << cfg.rate_hz << ")\n";
+              << ", rate_hz=" << cfg.rate_hz
+              << ", no_data=" << (cfg.no_data ? "true" : "false") << ")\n";
 
     const auto start_time = std::chrono::steady_clock::now();
 
@@ -306,6 +313,10 @@ int main(int argc, char** argv) {
       std::exponential_distribution<double> inter_arrival_dist(cfg.rate_hz);
 
       while (g_running) {
+        if (cfg.no_data) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(100));
+          continue;
+        }
         const auto now = std::chrono::steady_clock::now();
         const auto elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now - start_time).count();
         const uint64_t data56 = (elapsed_ns <= 0) ? 0ULL : (static_cast<uint64_t>(elapsed_ns) / 4ULL);
