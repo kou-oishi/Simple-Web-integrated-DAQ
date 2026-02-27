@@ -1,5 +1,6 @@
 #include "concrete_modules/kc705_tof/kc705_tof_overview_analysis.hpp"
 
+#include <algorithm>
 #include <string>
 
 #include <TCanvas.h>
@@ -32,6 +33,8 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
   canvas_board_ = std::make_unique<TCanvas>("kc705_board_canvas", "KC705 TOF: Board ID");
   canvas_channel_ = std::make_unique<TCanvas>("kc705_channel_canvas", "KC705 TOF: Channel ID");
   canvas_trend_ = std::make_unique<TCanvas>("kc705_value_trend_canvas", "KC705 TOF: Value Trend");
+  canvas_board_->SetLogy();
+  canvas_channel_->SetLogy();
   
   canvas_tofs_ = std::make_unique<TCanvas>("kc705_tofs_canvas", "KC705 TOF: TOFs", 1200, 900);
   canvas_tofs_->Divide(4, 4);
@@ -113,8 +116,8 @@ bool Kc705TofOverviewAnalysis::Event(const Kc705TofEvent& Event, std::string& er
     graph_trend_->RemovePoint(0);
   }
   
-  if (Event.channel_id < hist_tofs_.size()) {
-    hist_tofs_[Event.channel_id]->Fill(Event.time);
+  if (Event.channel_id-1 < hist_tofs_.size()) {
+    hist_tofs_[Event.channel_id-1]->Fill(Event.time);
 
     min_time_ = std::min(min_time_, Event.time);
     max_time_ = std::max(max_time_, Event.time);
@@ -130,9 +133,19 @@ bool Kc705TofOverviewAnalysis::UpdateDrawables(std::string& error_text) {
     return true;
   }
 
-  Double_t margin = 0.1 * (max_time_ - min_time_);
-  for(auto& hist_tof : hist_tofs_) {
-    hist_tof->GetXaxis()->SetRangeUser(min_time_ - margin, max_time_ + margin);
+  const Double_t margin = 0.1 * (max_time_ - min_time_);
+  for (auto& hist_tof : hist_tofs_) {
+    auto* axis = hist_tof->GetXaxis();
+    const Double_t axis_min = axis->GetXmin();
+    const Double_t axis_max = axis->GetXmax();
+    const Double_t range_min = std::clamp(min_time_ - margin, axis_min, axis_max);
+    const Double_t range_max = std::clamp(max_time_ + margin, axis_min, axis_max);
+
+    if (range_min <= range_max) {
+      axis->SetRangeUser(range_min, range_max);
+    } else {
+      axis->SetRangeUser(axis_min, axis_max);
+    }
   }
 
   return true;
