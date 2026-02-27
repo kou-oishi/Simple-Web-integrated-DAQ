@@ -34,11 +34,13 @@ let cachedNextRun = null;
 let cachedNextRunAtMs = 0;
 let daqConnected = false;
 let statusPollInFlight = false;
+let statusConsecutiveFailures = 0;
 let msgSource = '';
 let daqState = '-';
 let runLogLimit = 50;
 let monitorRunning = false;
-const STATUS_API_TIMEOUT_MS = 1500;
+const STATUS_API_TIMEOUT_MS = 15000;
+const STATUS_FAILURES_BEFORE_DISCONNECT = 3;
 const MAIN_FORM_STATE_KEY = 'simpledaq_main_form_state_v1';
 const MONITOR_STATE_KEY = 'simpledaq_monitor_state_v1';
 const DEVICES_STATE_KEY = 'simpledaq_devices_state_v1';
@@ -800,12 +802,18 @@ async function refreshStatus() {
   statusPollInFlight = true;
   try {
     const data = await callApi('/api/status', 'GET', null, { timeoutMs: STATUS_API_TIMEOUT_MS });
+    statusConsecutiveFailures = 0;
     setDaqConnection(true);
     await renderStatus(data);
     clearConnectionErrorMessageIfAny();
   } catch (e) {
-    setDaqConnection(false, e.message);
-    setConnectionErrorMessage(`daqd communication error: ${e.message}`);
+    statusConsecutiveFailures += 1;
+    if (statusConsecutiveFailures >= STATUS_FAILURES_BEFORE_DISCONNECT) {
+      setDaqConnection(false, e.message);
+      setConnectionErrorMessage(`daqd communication error: ${e.message}`);
+    } else {
+      statusError.textContent = `status retrying (${statusConsecutiveFailures}/${STATUS_FAILURES_BEFORE_DISCONNECT})`;
+    }
   } finally {
     statusPollInFlight = false;
   }
@@ -910,6 +918,17 @@ async function startDaqdFromWeb() {
   }
 }
 
+async function forceRestartDaqdFromWeb() {
+  try {
+    setDaqConnection(false, 'force restarting daqd...');
+    const data = await callApi('/api/daqd/restart-force', 'POST');
+    setMessage(data.result || 'daqd force restarted', true);
+    await refreshWholeUi();
+  } catch (e) {
+    setMessage(`failed to force restart daqd: ${e.message}`, false);
+  }
+}
+
 async function startDatamonFromWeb() {
   try {
     const payload = buildMonitorStartPayload();
@@ -932,6 +951,7 @@ async function stopDatamonFromWeb() {
 }
 
 document.getElementById('btn_start_daqd').addEventListener('click', startDaqdFromWeb);
+document.getElementById('btn_force_restart_daqd').addEventListener('click', forceRestartDaqdFromWeb);
 document.getElementById('btn_start').addEventListener('click', async () => {
   saveMainFormState();
   await runCommand('/api/start', 'POST', buildStartPayload());

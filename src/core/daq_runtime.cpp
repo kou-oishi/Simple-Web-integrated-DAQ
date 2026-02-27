@@ -67,6 +67,7 @@ void run_worker(const DeviceSpec& spec,
                 const std::chrono::steady_clock::time_point& startup_deadline,
                 std::vector<std::atomic<bool>>& connected_once,
                 std::atomic<uint32_t>& connected_count,
+                std::atomic<bool>& startup_completed,
                 std::vector<std::atomic<bool>>& worker_marked_dead,
                 std::atomic<uint32_t>& alive_worker_count,
                 std::vector<std::atomic<uint64_t>>& disconnect_event_count,
@@ -105,6 +106,19 @@ void run_worker(const DeviceSpec& spec,
       if (!connected_once[worker_index].load() &&
           std::chrono::steady_clock::now() >= startup_deadline) {
         const std::string msg = "startup failed: cannot connect " + device_label(spec);
+        log_line("[ERROR] " + msg);
+        startup_failed.store(true);
+        std::call_once(startup_notify_once, [&]() {
+          if (on_startup_status) {
+            on_startup_status(false, msg);
+          }
+        });
+        running.store(false);
+        queue.Close();
+        return;
+      }
+      if (connected_once[worker_index].load() && !startup_completed.load()) {
+        const std::string msg = "startup failed: lost device during startup " + device_label(spec);
         log_line("[ERROR] " + msg);
         startup_failed.store(true);
         std::call_once(startup_notify_once, [&]() {
@@ -181,6 +195,7 @@ void run_worker(const DeviceSpec& spec,
     if (!connected_once[worker_index].exchange(true)) {
       const uint32_t n = connected_count.fetch_add(1) + 1;
       if (n == connected_once.size()) {
+        startup_completed.store(true);
         std::call_once(startup_notify_once, [&]() {
           if (on_startup_status) {
             on_startup_status(true, "all devices connected");
@@ -210,6 +225,19 @@ void run_worker(const DeviceSpec& spec,
         log_line("[WARN] disconnected/read-error: " + device_label(spec));
         driver->DisconnectDevice();
         validator->Reset();
+        if (connected_once[worker_index].load() && !startup_completed.load()) {
+          const std::string msg = "startup failed: read/disconnect during startup " + device_label(spec);
+          log_line("[ERROR] " + msg);
+          startup_failed.store(true);
+          std::call_once(startup_notify_once, [&]() {
+            if (on_startup_status) {
+              on_startup_status(false, msg);
+            }
+          });
+          running.store(false);
+          queue.Close();
+          return;
+        }
         if (connected_once[worker_index].load() && !reconnect_window_active) {
           reconnect_window_active = true;
           reconnect_deadline =
@@ -515,6 +543,7 @@ int RunDaqCore(const DaqConfig& cfg,
     connected_once[i].store(false);
   }
   std::atomic<uint32_t> connected_count{0};
+  std::atomic<bool> startup_completed{false};
   std::vector<std::atomic<bool>> worker_marked_dead(effective_cfg.devices.size());
   for (size_t i = 0; i < worker_marked_dead.size(); ++i) {
     worker_marked_dead[i].store(false);
@@ -567,6 +596,7 @@ int RunDaqCore(const DaqConfig& cfg,
                  startup_deadline,
                  connected_once,
                  connected_count,
+                 startup_completed,
                  worker_marked_dead,
                  alive_worker_count,
                  disconnect_event_count,

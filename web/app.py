@@ -29,6 +29,8 @@ DEFAULT_DAQD = REPO_ROOT / "build" / "daqd"
 DEFAULT_DATAMON = REPO_ROOT / "build" / "datamon"
 DEFAULT_WEB_CONFIG = APP_ROOT / "defaults.json"
 DAQCTL_TIMEOUT_SEC = 2
+DAQCTL_STATUS_TIMEOUT_SEC = 10
+DAQCTL_COMMAND_TIMEOUT_SEC = 30
 
 _DAQD_LOCK = threading.Lock()
 _DAQD_PROC: subprocess.Popen[Any] | None = None
@@ -370,16 +372,51 @@ def _parse_status_line(line: str) -> dict[str, Any]:
     return result
 
 
+def _query_daqd_status(timeout_sec: int = DAQCTL_STATUS_TIMEOUT_SEC) -> tuple[bool, dict[str, Any] | None, str]:
+    rc, out, err = _run_cmd([*_daqctl_base_args(), "status"], timeout_sec=timeout_sec)
+    if rc != 0:
+        detail = err or out or "daqctl status failed"
+        return False, None, detail
+    return True, _parse_status_line(out), ""
+
+
 def _is_daqd_running() -> tuple[bool, int | None]:
     global _DAQD_PROC
     with _DAQD_LOCK:
-        if _DAQD_PROC is None:
-            return False, None
-        rc = _DAQD_PROC.poll()
-        if rc is not None:
-            _DAQD_PROC = None
-            return False, None
-        return True, _DAQD_PROC.pid
+        if _DAQD_PROC is not None:
+            rc = _DAQD_PROC.poll()
+            if rc is not None:
+                _DAQD_PROC = None
+        tracked_pid = _DAQD_PROC.pid if _DAQD_PROC is not None else None
+
+    ok, _status, _detail = _query_daqd_status(timeout_sec=DAQCTL_STATUS_TIMEOUT_SEC)
+    if not ok:
+        return False, None
+    return True, tracked_pid
+
+
+def _force_kill_all_daqd(timeout_sec: float = 5.0) -> tuple[int, str]:
+    # killall daqd equivalent: terminate all daqd processes, then SIGKILL if needed.
+    _run_cmd(["pkill", "-TERM", "-x", "daqd"], timeout_sec=max(1, int(timeout_sec)))
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        rc, out, _err = _run_cmd(["pgrep", "-x", "daqd"], timeout_sec=1)
+        if rc != 0:
+            return 0, "terminated with SIGTERM"
+        time.sleep(0.1)
+
+    _run_cmd(["pkill", "-KILL", "-x", "daqd"], timeout_sec=max(1, int(timeout_sec)))
+    kill_deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < kill_deadline:
+        rc, out, _err = _run_cmd(["pgrep", "-x", "daqd"], timeout_sec=1)
+        if rc != 0:
+            return 0, "terminated with SIGKILL"
+        time.sleep(0.1)
+
+    rc, out, _err = _run_cmd(["pgrep", "-x", "daqd"], timeout_sec=1)
+    if rc == 0:
+        return 1, f"failed to kill daqd pids: {out}"
+    return 0, "terminated"
 
 
 def _is_datamon_running() -> tuple[bool, int | None]:
@@ -621,6 +658,39 @@ def start_daqd() -> dict[str, Any]:
             raise HTTPException(status_code=500, detail={"error": f"failed to start daqd: {ex}", "cmd": shlex.join(args)}) from ex
 
     return {"result": "daqd started", "pid": _DAQD_PROC.pid}
+
+
+@app.post("/api/daqd/restart-force")
+def restart_daqd_force() -> dict[str, Any]:
+    global _DAQD_PROC
+
+    kill_rc, kill_result = _force_kill_all_daqd(timeout_sec=5.0)
+    if kill_rc != 0:
+        raise HTTPException(status_code=500, detail={"error": kill_result})
+
+    with _DAQD_LOCK:
+        _DAQD_PROC = None
+
+    args = _daqd_base_args()
+    DAQD_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    with _DAQD_LOCK:
+        try:
+            with DAQD_LOG_PATH.open("a", encoding="utf-8") as log_head:
+                log_head.write("\n=== web requested daqd force restart ===\n")
+            _DAQD_PROC = subprocess.Popen(
+                args,
+                cwd=str(REPO_ROOT),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                start_new_session=True,
+            )
+        except Exception as ex:
+            _DAQD_PROC = None
+            raise HTTPException(status_code=500, detail={"error": f"failed to restart daqd: {ex}", "cmd": shlex.join(args)}) from ex
+
+    return {"result": f"daqd force restarted ({kill_result})", "pid": _DAQD_PROC.pid}
 
 
 @app.get("/api/daqd/log")
@@ -1116,10 +1186,10 @@ def get_frontends() -> dict[str, Any]:
 
 @app.get("/api/status")
 def get_status() -> dict[str, Any]:
-    rc, out, err = _run_cmd([*_daqctl_base_args(), "status"], timeout_sec=DAQCTL_TIMEOUT_SEC)
-    if rc != 0:
-        raise HTTPException(status_code=500, detail={"error": "daqctl status failed", "stderr": err, "stdout": out})
-    return _parse_status_line(out)
+    ok, status, detail = _query_daqd_status(timeout_sec=DAQCTL_STATUS_TIMEOUT_SEC)
+    if not ok or status is None:
+        raise HTTPException(status_code=500, detail={"error": "daqctl status failed", "stderr": detail, "stdout": ""})
+    return status
 
 
 @app.get("/api/next-run")
@@ -1223,7 +1293,7 @@ def start_daq(req: StartRequest) -> dict[str, Any]:
     if comment:
         args.extend(["--comment", comment])
 
-    rc, out, err = _run_cmd(args, timeout_sec=max(DAQCTL_TIMEOUT_SEC, 5))
+    rc, out, err = _run_cmd(args, timeout_sec=max(DAQCTL_COMMAND_TIMEOUT_SEC, 5))
     if rc != 0:
         raise HTTPException(status_code=500, detail={"error": "daqctl start failed", "stderr": err, "stdout": out, "cmd": shlex.join(args)})
     if out.lower().startswith("error"):
@@ -1233,7 +1303,7 @@ def start_daq(req: StartRequest) -> dict[str, Any]:
 
 @app.post("/api/pause")
 def pause_daq() -> dict[str, str]:
-    rc, out, err = _run_cmd([*_daqctl_base_args(), "pause"], timeout_sec=DAQCTL_TIMEOUT_SEC)
+    rc, out, err = _run_cmd([*_daqctl_base_args(), "pause"], timeout_sec=DAQCTL_COMMAND_TIMEOUT_SEC)
     if rc != 0 or out.lower().startswith("error"):
         raise HTTPException(status_code=400, detail={"error": out or err})
     return {"result": out}
@@ -1241,7 +1311,7 @@ def pause_daq() -> dict[str, str]:
 
 @app.post("/api/resume")
 def resume_daq() -> dict[str, str]:
-    rc, out, err = _run_cmd([*_daqctl_base_args(), "resume"], timeout_sec=DAQCTL_TIMEOUT_SEC)
+    rc, out, err = _run_cmd([*_daqctl_base_args(), "resume"], timeout_sec=DAQCTL_COMMAND_TIMEOUT_SEC)
     if rc != 0 or out.lower().startswith("error"):
         raise HTTPException(status_code=400, detail={"error": out or err})
     return {"result": out}
@@ -1249,7 +1319,7 @@ def resume_daq() -> dict[str, str]:
 
 @app.post("/api/stop")
 def stop_daq() -> dict[str, str]:
-    rc, out, err = _run_cmd([*_daqctl_base_args(), "stop"], timeout_sec=DAQCTL_TIMEOUT_SEC)
+    rc, out, err = _run_cmd([*_daqctl_base_args(), "stop"], timeout_sec=DAQCTL_COMMAND_TIMEOUT_SEC)
     if rc != 0 or out.lower().startswith("error"):
         raise HTTPException(status_code=400, detail={"error": out or err})
     return {"result": out}
@@ -1257,7 +1327,7 @@ def stop_daq() -> dict[str, str]:
 
 @app.post("/api/shutdown")
 def shutdown_daqd() -> dict[str, str]:
-    rc, out, err = _run_cmd([*_daqctl_base_args(), "shutdown"], timeout_sec=DAQCTL_TIMEOUT_SEC)
+    rc, out, err = _run_cmd([*_daqctl_base_args(), "shutdown"], timeout_sec=DAQCTL_COMMAND_TIMEOUT_SEC)
     if rc != 0 or out.lower().startswith("error"):
         raise HTTPException(status_code=400, detail={"error": out or err})
     return {"result": out}
