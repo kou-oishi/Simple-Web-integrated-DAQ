@@ -114,9 +114,7 @@ void TcpDeviceDriver::DisconnectDevice() {
     // even when no application data has been exchanged yet.
     const linger lin{1, 0};
     (void)::setsockopt(sock_fd_, SOL_SOCKET, SO_LINGER, &lin, sizeof(lin));
-    // Force both directions closed before closing fd so peer can observe
-    // disconnect promptly instead of waiting for further I/O.
-    (void)::shutdown(sock_fd_, SHUT_RDWR);
+    // Do not call shutdown() before close(); with linger(0) we want hard close (RST).
     ::close(sock_fd_);
     sock_fd_ = -1;
   }
