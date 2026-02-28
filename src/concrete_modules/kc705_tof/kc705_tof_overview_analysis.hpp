@@ -26,6 +26,7 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
   bool Event(const Kc705TofEvent& Event, std::string& error_text) override;
 
   std::size_t trend_points_ = 1000;
+  Double_t daq_start_time_[2] = {-1, -1};
   Double_t min_time_ = 1e100, max_time_ = -1e100;
   
   std::unique_ptr<TCanvas> canvas_board_;
