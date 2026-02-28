@@ -2,7 +2,7 @@
 
 #include <iostream>
 
-TextSink::TextSink(const IDecoder* decoder, std::string output_path, uint64_t print_every, bool print_summary)
+TextSink::TextSink(IDecoder* decoder, std::string output_path, uint64_t print_every, bool print_summary)
     : decoder_(decoder),
       output_path_(std::move(output_path)),
       use_stdout_(output_path_.empty() || output_path_ == "-"),
@@ -41,8 +41,12 @@ bool TextSink::Consume(const DecodedMessage& message, std::string& error_text) {
   }
 
   std::string text;
-  if (!decoder_->FormatDecoded(message, text, error_text)) {
+  bool quiet = false;
+  if (!decoder_->FormatDecoded(message, text, quiet, error_text)) {
     return false;
+  }
+  if (quiet) {
+    return true;
   }
 
   if (use_stdout_) {

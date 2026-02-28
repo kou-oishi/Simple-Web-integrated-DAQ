@@ -17,7 +17,7 @@ class IEventSink {
 
 class TextSink : public IEventSink {
  public:
-  TextSink(const IDecoder* decoder, std::string output_path, uint64_t print_every, bool print_summary);
+  TextSink(IDecoder* decoder, std::string output_path, uint64_t print_every, bool print_summary);
 
   bool Consume(const DecodedMessage& message, std::string& error_text) override;
   bool Finalise(std::string& error_text) override;
@@ -25,7 +25,7 @@ class TextSink : public IEventSink {
  private:
   bool EnsureOpen(std::string& error_text);
 
-  const IDecoder* decoder_;
+  IDecoder* decoder_;
   std::string output_path_;
   std::ofstream ofs_;
   bool use_stdout_ = true;

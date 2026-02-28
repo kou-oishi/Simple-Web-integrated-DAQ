@@ -54,5 +54,9 @@ class IDecoder {
                                       std::string& error_text) const = 0;
 
   // Helper for generic console output.
-  virtual bool FormatDecoded(const DecodedMessage& message, std::string& out_text, std::string& error_text) const = 0;
+  // out_quiet=true requests sink to suppress the whole output line for this message.
+  virtual bool FormatDecoded(const DecodedMessage& message,
+                             std::string& out_text,
+                             bool& out_quiet,
+                             std::string& error_text) = 0;
 };

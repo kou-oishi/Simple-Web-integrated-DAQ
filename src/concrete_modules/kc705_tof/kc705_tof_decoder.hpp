@@ -18,10 +18,15 @@ class Kc705TofDecoder final : public IDecoder {
   bool DecodedToTreeValues(const DecodedMessage& message,
                               std::vector<TreeValue>& out_values,
                               std::string& error_text) const override;
-  bool FormatDecoded(const DecodedMessage& message, std::string& out_text, std::string& error_text) const override;
+  bool FormatDecoded(const DecodedMessage& message,
+                     std::string& out_text,
+                     bool& out_quiet,
+                     std::string& error_text) override;
 
  private:
   static bool frame_to_event(const std::vector<uint8_t>& frame, Kc705TofEvent& out_event, std::string& error_text);
+
+  size_t num_periodic_events[4] = {0};
 };
 
 class Kc705TofDecoderFactory final : public IMonitorDecoderFactory {

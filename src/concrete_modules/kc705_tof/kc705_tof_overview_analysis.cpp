@@ -33,23 +33,45 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
   canvas_board_ = std::make_unique<TCanvas>("kc705_board_canvas", "KC705 TOF: Board ID");
   canvas_channel_ = std::make_unique<TCanvas>("kc705_channel_canvas", "KC705 TOF: Channel ID");
   canvas_trend_ = std::make_unique<TCanvas>("kc705_value_trend_canvas", "KC705 TOF: Value Trend");
+  canvas_board_->SetLeftMargin(0.15);
+  canvas_board_->SetBottomMargin(0.15);
+  canvas_board_->SetRightMargin(0.05);
+  canvas_channel_->SetLeftMargin(0.15);
+  canvas_channel_->SetBottomMargin(0.15);
+  canvas_channel_->SetRightMargin(0.05);
+  canvas_trend_->SetLeftMargin(0.15);
+  canvas_trend_->SetBottomMargin(0.15);
+  canvas_trend_->SetRightMargin(0.05);
   canvas_board_->SetLogy();
   canvas_channel_->SetLogy();
   
-  canvas_tofs_ = std::make_unique<TCanvas>("kc705_tofs_canvas", "KC705 TOF: TOFs", 1200, 900);
+  canvas_tofs_ = std::make_unique<TCanvas>("kc705_tofs_canvas", "KC705 TOF: TOFs", 1500, 1000);
   canvas_tofs_->Divide(4, 4);
+  for (int i = 1; i <= 16; ++i) {
+    auto* pad = canvas_tofs_->cd(i);
+    if (pad != nullptr) {
+      pad->SetLeftMargin(0.15);
+      pad->SetBottomMargin(0.15);
+      pad->SetRightMargin(0.05);
+    }
+  }
 
   hist_board_ = std::make_unique<TH1D>("kc705_board_hist", "Board ID;Board;counts", 2, 0, 2);
   hist_board_->GetXaxis()->SetBinLabel(1, "Board 0x000");
   hist_board_->GetXaxis()->SetBinLabel(2, "Board 0x111");
   hist_board_->SetFillColor(kBlue-7);
   hist_board_->SetStats(kFALSE);
+  hist_board_->SetMarkerSize(3.0);
 
   hist_channel_ = std::make_unique<TH1D>("kc705_channel_hist", "Channel ID;Channel;counts", 13, 1, 14);
   hist_board_->SetDirectory(nullptr);
   hist_channel_->SetDirectory(nullptr);
   hist_channel_->SetFillColor(kBlue-7);
   hist_channel_->SetStats(kFALSE);
+  hist_channel_->SetMarkerSize(2.4);
+  for(int i = 1; i <= 13; ++i) {
+    hist_channel_->GetXaxis()->SetBinLabel(i, Form("%d", i));
+  }
 
   hist_tofs_.reserve(13);
   for (int i = 0; i < 13; ++i) {
@@ -64,6 +86,29 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
   graph_trend_ = std::make_unique<TGraph>();
   graph_trend_->SetTitle("time trend;event_number;Time - DAQ Start (min)");
 
+  auto apply_axis_text_style = [](TH1D* hist, Double_t label_size, Double_t title_size) {
+    if (hist == nullptr) {
+      return;
+    }
+    hist->GetXaxis()->SetLabelSize(label_size);
+    hist->GetYaxis()->SetLabelSize(label_size);
+    hist->GetXaxis()->SetTitleSize(title_size);
+    hist->GetYaxis()->SetTitleSize(title_size);
+    hist->GetXaxis()->SetTitleOffset(0.95);
+    hist->GetYaxis()->SetTitleOffset(1.0);
+  };
+  apply_axis_text_style(hist_board_.get(), 0.06, 0.07);
+  apply_axis_text_style(hist_channel_.get(), 0.055, 0.065);
+  for (auto& hist_tof : hist_tofs_) {
+    apply_axis_text_style(hist_tof.get(), 0.06, 0.07);
+  }
+  graph_trend_->GetXaxis()->SetLabelSize(0.05);
+  graph_trend_->GetYaxis()->SetLabelSize(0.05);
+  graph_trend_->GetXaxis()->SetTitleSize(0.06);
+  graph_trend_->GetYaxis()->SetTitleSize(0.06);
+  graph_trend_->GetXaxis()->SetTitleOffset(0.95);
+  graph_trend_->GetYaxis()->SetTitleOffset(1.0);
+
   if (!RegisterCanvas(canvas_board_.get(), error_text) ||
       !RegisterCanvas(canvas_channel_.get(), error_text) ||
       !RegisterCanvas(canvas_trend_.get(), error_text) ||
@@ -71,8 +116,8 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
     return false;
   }
 
-  if (!RegisterDrawable(canvas_board_.get(), hist_board_.get(), "", error_text) ||
-      !RegisterDrawable(canvas_channel_.get(), hist_channel_.get(), "", error_text) ||
+  if (!RegisterDrawable(canvas_board_.get(), hist_board_.get(), "HIST TEXT0", error_text) ||
+      !RegisterDrawable(canvas_channel_.get(), hist_channel_.get(), "HIST TEXT", error_text) ||
       !RegisterDrawable(canvas_trend_.get(), graph_trend_.get(), "AL", error_text)) {
     return false;
   }
@@ -116,7 +161,7 @@ bool Kc705TofOverviewAnalysis::Event(const Kc705TofEvent& Event, std::string& er
   }
   
   // Skip the periodic channels
-  if(true && (Event.channel_id == 1  || Event.channel_id == 2 || Event.channel_id == 7 || Event.channel_id == 8)) {
+  if(Event.channel_id == 1  || Event.channel_id == 2 || Event.channel_id == 7 || Event.channel_id == 8) {
     return true;
   }
 
