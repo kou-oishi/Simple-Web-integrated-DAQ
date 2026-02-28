@@ -494,15 +494,80 @@ def _load_monitor_modules() -> dict[str, Any]:
     return {"decoders": decoders, "analyses": analyses}
 
 
-def _tail_lines(path: Path, limit: int) -> list[str]:
-    if limit <= 0 or not path.exists():
-        return []
+def _tail_lines(
+    path: Path,
+    limit: int,
+    offset: int = 0,
+    grep: str = "",
+    exclude: str = "",
+    use_regex: bool = False,
+    ignore_case: bool = True,
+    levels: str = "",
+) -> tuple[list[str], int]:
+    if limit <= 0 or offset < 0 or not path.exists():
+        return [], 0
     try:
         with path.open("r", encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
+            raw_lines = fh.readlines()
     except Exception:
-        return []
-    return [line.rstrip("\n") for line in lines[-limit:]]
+        return [], 0
+
+    filtered_lines = [line.rstrip("\n") for line in raw_lines]
+    selected_levels = {x.strip().upper() for x in levels.split(",") if x.strip() != ""}
+    if selected_levels:
+        level_tokens = {
+            "ERROR": "[ERROR]",
+            "WARN": "[WARN]",
+            "INFO": "[INFO]",
+            "DEBUG": "[DEBUG]",
+        }
+        tokens = [level_tokens[k] for k in selected_levels if k in level_tokens]
+        if tokens:
+            filtered_lines = [line for line in filtered_lines if any(token in line for token in tokens)]
+
+    grep_text = grep or ""
+    exclude_text = exclude or ""
+    if grep_text or exclude_text:
+        if use_regex:
+            flags = re.IGNORECASE if ignore_case else 0
+            grep_re = re.compile(grep_text, flags) if grep_text else None
+            exclude_re = re.compile(exclude_text, flags) if exclude_text else None
+            out: list[str] = []
+            for line in filtered_lines:
+                if grep_re is not None and grep_re.search(line) is None:
+                    continue
+                if exclude_re is not None and exclude_re.search(line) is not None:
+                    continue
+                out.append(line)
+            filtered_lines = out
+        else:
+            if ignore_case:
+                grep_cmp = grep_text.lower()
+                exclude_cmp = exclude_text.lower()
+                out = []
+                for line in filtered_lines:
+                    line_cmp = line.lower()
+                    if grep_cmp and grep_cmp not in line_cmp:
+                        continue
+                    if exclude_cmp and exclude_cmp in line_cmp:
+                        continue
+                    out.append(line)
+                filtered_lines = out
+            else:
+                out = []
+                for line in filtered_lines:
+                    if grep_text and grep_text not in line:
+                        continue
+                    if exclude_text and exclude_text in line:
+                        continue
+                    out.append(line)
+                filtered_lines = out
+
+    total = len(filtered_lines)
+    end = max(0, total - offset)
+    start = max(0, end - limit)
+    sliced = filtered_lines[start:end]
+    return sliced, total
 
 
 def _to_bool(value: Any, default: bool = False) -> bool:
@@ -585,6 +650,16 @@ def runlog_page() -> FileResponse:
     return FileResponse(APP_ROOT / "runlog.html")
 
 
+@app.get("/daq-log")
+def daq_log_page() -> FileResponse:
+    return FileResponse(APP_ROOT / "daqlog.html")
+
+
+@app.get("/analysis-log")
+def analysis_log_page() -> FileResponse:
+    return FileResponse(APP_ROOT / "analysislog.html")
+
+
 @app.get("/analysis")
 def analysis_page() -> FileResponse:
     return FileResponse(APP_ROOT / "analysis.html")
@@ -613,6 +688,11 @@ def runlog_js() -> FileResponse:
 @app.get("/analysis.js")
 def analysis_js() -> FileResponse:
     return FileResponse(APP_ROOT / "analysis.js", media_type="application/javascript")
+
+
+@app.get("/logpage.js")
+def logpage_js() -> FileResponse:
+    return FileResponse(APP_ROOT / "logpage.js", media_type="application/javascript")
 
 
 @app.get("/sidebar.js")
@@ -694,17 +774,39 @@ def restart_daqd_force() -> dict[str, Any]:
 
 
 @app.get("/api/daqd/log")
-def get_daqd_log(limit: int = Query(default=50, ge=1, le=500)) -> dict[str, Any]:
-    lines = _tail_lines(DAQD_LOG_PATH, limit)
+def get_daqd_log(
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    grep: str = Query(default=""),
+    exclude: str = Query(default=""),
+    regex: bool = Query(default=False),
+    ignore_case: bool = Query(default=True),
+    levels: str = Query(default=""),
+) -> dict[str, Any]:
+    try:
+        lines, total = _tail_lines(DAQD_LOG_PATH, limit, offset, grep, exclude, regex, ignore_case, levels)
+    except re.error as ex:
+        raise HTTPException(status_code=400, detail={"error": f"invalid regex: {ex}"}) from ex
     running, pid = _is_daqd_running()
-    return {"running": running, "pid": pid, "lines": lines, "path": str(DAQD_LOG_PATH)}
+    return {"running": running, "pid": pid, "lines": lines, "path": str(DAQD_LOG_PATH), "total": total, "offset": offset}
 
 
 @app.get("/api/monitor/log")
-def get_datamon_log(limit: int = Query(default=50, ge=1, le=500)) -> dict[str, Any]:
-    lines = _tail_lines(DATAMON_LOG_PATH, limit)
+def get_datamon_log(
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    grep: str = Query(default=""),
+    exclude: str = Query(default=""),
+    regex: bool = Query(default=False),
+    ignore_case: bool = Query(default=True),
+    levels: str = Query(default=""),
+) -> dict[str, Any]:
+    try:
+        lines, total = _tail_lines(DATAMON_LOG_PATH, limit, offset, grep, exclude, regex, ignore_case, levels)
+    except re.error as ex:
+        raise HTTPException(status_code=400, detail={"error": f"invalid regex: {ex}"}) from ex
     running, pid = _is_datamon_running()
-    return {"running": running, "pid": pid, "lines": lines, "path": str(DATAMON_LOG_PATH)}
+    return {"running": running, "pid": pid, "lines": lines, "path": str(DATAMON_LOG_PATH), "total": total, "offset": offset}
 
 
 @app.get("/api/monitor/modules")

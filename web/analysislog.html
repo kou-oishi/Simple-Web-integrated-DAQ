@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Analysis Log</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/status_panel.css" />
+</head>
+<body>
+  <div class="app-layout" data-log-api="/api/monitor/log" data-log-title="Analysis Log" data-log-empty="(no datamon log)" data-log-kind="analysis">
+    <aside class="sidebar">
+      <div class="sidebar-title" id="page_title">DAQ Control Panel</div>
+      <nav class="sidebar-nav">
+        <a class="menu-btn" href="/">
+          <span class="menu-main">Main</span>
+          <span class="menu-sub">DAQ control and status</span>
+        </a>
+        <a class="menu-btn" href="/run-log">
+          <span class="menu-main">Run Log</span>
+          <span class="menu-sub">Extended run history</span>
+        </a>
+        <a class="menu-btn" href="/daq-log">
+          <span class="menu-main">DAQ log</span>
+          <span class="menu-sub">daqd full log</span>
+        </a>
+        <a class="menu-btn active" href="/analysis-log">
+          <span class="menu-main">Analysis Log</span>
+          <span class="menu-sub">datamon full log</span>
+        </a>
+      </nav>
+    </aside>
+    <main class="content">
+      <div id="global_status_mount"></div>
+
+      <section class="panel">
+        <div class="toolbar">
+          <h2 id="log_title" style="margin:0;">Analysis Log</h2>
+          <button id="btn_refresh_log">Refresh</button>
+        </div>
+        <div class="runlog-toolbar" style="margin-top:10px;">
+          <div class="runlog-filter-item">
+            <label for="log_grep">Include</label>
+            <input id="log_grep" type="text" placeholder="grep pattern" />
+          </div>
+          <div class="runlog-filter-item">
+            <label for="log_exclude">Exclude</label>
+            <input id="log_exclude" type="text" placeholder="exclude pattern" />
+          </div>
+          <label class="checkbox-inline">
+            <input id="log_regex" type="checkbox" />
+            Regex
+          </label>
+          <label class="checkbox-inline">
+            <input id="log_ignore_case" type="checkbox" checked />
+            Ignore case
+          </label>
+          <label class="checkbox-inline">
+            <input id="log_level_error" type="checkbox" />
+            ERROR
+          </label>
+          <label class="checkbox-inline">
+            <input id="log_level_warn" type="checkbox" />
+            WARN
+          </label>
+          <label class="checkbox-inline">
+            <input id="log_level_info" type="checkbox" />
+            INFO
+          </label>
+          <button id="btn_clear_log_filters">Clear</button>
+        </div>
+        <div class="actions" id="log_quick_tokens" style="margin-top:8px;"></div>
+        <div id="log_meta" class="check-help" style="margin-top:8px;"></div>
+        <pre id="full_log_view" class="daqd-log-view" style="margin-top:12px; min-height:420px;"></pre>
+      </section>
+    </main>
+  </div>
+  <script src="/status_panel.js" defer></script>
+  <script src="/sidebar.js" defer></script>
+  <script src="/logpage.js" defer></script>
+</body>
+</html>
