@@ -7,8 +7,12 @@ MonitorPipeline::MonitorPipeline(std::unique_ptr<IFrameSource> source,
 
 bool MonitorPipeline::Run(uint64_t max_events,
                           std::string& error_text,
-                          const volatile std::sig_atomic_t* stop_requested) {
+                          const volatile std::sig_atomic_t* stop_requested,
+                          uint64_t* out_processed_events) {
   error_text.clear();
+  if (out_processed_events != nullptr) {
+    *out_processed_events = 0;
+  }
 
   auto finalise_sinks = [&](std::string& out_error_text) -> bool {
     std::string finalise_error;
@@ -58,6 +62,10 @@ bool MonitorPipeline::Run(uint64_t max_events,
     }
 
     ++idx;
+  }
+
+  if (out_processed_events != nullptr) {
+    *out_processed_events = idx;
   }
 
   return finalise_sinks(error_text);

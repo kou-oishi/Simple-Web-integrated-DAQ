@@ -16,7 +16,10 @@ class MonitorPipeline {
                   std::unique_ptr<IDecoder> decoder,
                   std::vector<std::unique_ptr<IEventSink>> sinks);
 
-  bool Run(uint64_t max_events, std::string& error_text, const volatile std::sig_atomic_t* stop_requested = nullptr);
+  bool Run(uint64_t max_events,
+           std::string& error_text,
+           const volatile std::sig_atomic_t* stop_requested = nullptr,
+           uint64_t* out_processed_events = nullptr);
 
  private:
   std::unique_ptr<IFrameSource> source_;

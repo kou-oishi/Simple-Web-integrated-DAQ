@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <sstream>
 #include <thread>
+#include <utility>
 
 #include "core/defaults.hpp"
 
@@ -99,6 +100,40 @@ SourceStatus FileFrameSource::NextFrame(FrameEnvelope& out_frame,
   out_frame.event_number = next_event_number_++;
 
   return SourceStatus::kOk;
+}
+
+MultiFileFrameSource::MultiFileFrameSource(std::vector<std::string> paths, std::size_t frame_size)
+    : paths_(std::move(paths)), frame_size_(frame_size) {}
+
+SourceStatus MultiFileFrameSource::NextFrame(FrameEnvelope& out_frame,
+                                             std::string& error_text,
+                                             const volatile std::sig_atomic_t* stop_requested) {
+  out_frame.payload.clear();
+  error_text.clear();
+  if (stop_requested != nullptr && *stop_requested != 0) {
+    return SourceStatus::kEof;
+  }
+
+  while (current_index_ < paths_.size()) {
+    if (current_source_ == nullptr) {
+      current_source_ = std::make_unique<FileFrameSource>(paths_[current_index_], frame_size_);
+    }
+
+    std::string local_error;
+    const SourceStatus st = current_source_->NextFrame(out_frame, local_error, stop_requested);
+    if (st == SourceStatus::kOk) {
+      return SourceStatus::kOk;
+    }
+    if (st == SourceStatus::kError) {
+      error_text = "failed while reading '" + paths_[current_index_] + "': " + local_error;
+      return SourceStatus::kError;
+    }
+
+    ++current_index_;
+    current_source_.reset();
+  }
+
+  return SourceStatus::kEof;
 }
 
 LiveRunFileSource::LiveRunFileSource(std::string output_dir,

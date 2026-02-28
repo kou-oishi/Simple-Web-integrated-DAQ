@@ -1,14 +1,5 @@
-let msg = document.getElementById('msg');
 const pageTitle = document.getElementById('page_title');
 const runLogBody = document.getElementById('runlog_tbody');
-let stateLamp = document.getElementById('state_lamp');
-let statusState = document.getElementById('status_state');
-let statusRun = document.getElementById('status_run');
-let statusSubrun = document.getElementById('status_subrun');
-let statusEventsTotal = document.getElementById('status_events_total');
-let statusUptime = document.getElementById('status_uptime');
-let statusFileProgressText = document.getElementById('status_file_progress_text');
-let statusFileProgressFill = document.getElementById('status_file_progress_fill');
 const limitInput = document.getElementById('runlog_limit');
 const offsetInput = document.getElementById('runlog_offset');
 const statusSelect = document.getElementById('runlog_status');
@@ -22,52 +13,13 @@ const subrunHeader = document.getElementById('th_subrun');
 let timerId = null;
 let statusTimerId = null;
 let eventsPerFileDefault = 0;
-let cachedNextRun = null;
-let cachedNextRunAtMs = 0;
-const MAIN_FORM_STATE_KEY = 'simpledaq_main_form_state_v1';
-
-function loadMainFormState() {
-  try {
-    const raw = window.localStorage.getItem(MAIN_FORM_STATE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return null;
-    return parsed;
-  } catch (_) {
-    return null;
-  }
-}
-
-function ensureStatusPanelElements() {
-  if (window.SimpleDaqStatusPanel && typeof window.SimpleDaqStatusPanel.mountGlobalStatusPanel === 'function') {
-    window.SimpleDaqStatusPanel.mountGlobalStatusPanel();
-  }
-  msg = document.getElementById('msg');
-  stateLamp = document.getElementById('state_lamp');
-  statusState = document.getElementById('status_state');
-  statusRun = document.getElementById('status_run');
-  statusSubrun = document.getElementById('status_subrun');
-  statusEventsTotal = document.getElementById('status_events_total');
-  statusUptime = document.getElementById('status_uptime');
-  statusFileProgressText = document.getElementById('status_file_progress_text');
-  statusFileProgressFill = document.getElementById('status_file_progress_fill');
-  return Boolean(
-    msg &&
-    stateLamp &&
-    statusState &&
-    statusRun &&
-    statusSubrun &&
-    statusEventsTotal &&
-    statusUptime &&
-    statusFileProgressText &&
-    statusFileProgressFill
-  );
-}
 
 function setMessage(text, ok = true) {
-  if (!msg && !ensureStatusPanelElements()) return;
-  msg.className = 'msg status-msg ' + (ok ? 'ok' : 'err');
-  msg.textContent = text || '';
+  if (!window.SimpleDaqStatusPanel || typeof window.SimpleDaqStatusPanel.ensureElements !== 'function') return;
+  const elements = window.SimpleDaqStatusPanel.ensureElements();
+  if (!elements || !elements.msg) return;
+  elements.msg.className = 'msg status-msg ' + (ok ? 'ok' : 'err');
+  elements.msg.textContent = text || '';
 }
 
 function parseApiError(data, status) {
@@ -170,83 +122,14 @@ async function refreshRunLog() {
 }
 
 async function refreshStatus() {
-  if (!ensureStatusPanelElements()) {
+  if (!window.SimpleDaqStatusPanel || typeof window.SimpleDaqStatusPanel.refreshGlobalStatus !== 'function') {
     return;
   }
-  try {
-    const data = await callApi('/api/status');
-    const running = Number(data.running || 0) === 1;
-    const state = String(data.state || '-');
-    const run = (data.Run !== undefined) ? Number(data.Run) : 0;
-    const subrun = (data.subrun !== undefined) ? Number(data.subrun) : 0;
-    const total = (data.events_total !== undefined) ? Number(data.events_total) : 0;
-    const uptime = (data.uptime_sec !== undefined) ? Number(data.uptime_sec) : 0;
-
-    if (state === 'running') {
-      stateLamp.className = 'lamp ok';
-    } else if (state === 'paused' || state === 'pausing' || state === 'stopping') {
-      stateLamp.className = 'lamp warn';
-    } else if (state === 'error') {
-      stateLamp.className = 'lamp bad';
-    } else {
-      stateLamp.className = 'lamp';
-    }
-    statusState.textContent = state;
-    let displayRun = run;
-    let displaySubrun = subrun;
-    if (!running && state !== 'running') {
-      try {
-        displayRun = await fetchNextRun(false);
-        displaySubrun = 0;
-      } catch (_) {
-        displayRun = run + 1;
-        displaySubrun = 0;
-      }
-    }
-    statusRun.textContent = String(displayRun);
-    statusSubrun.textContent = String(displaySubrun);
-    statusEventsTotal.textContent = String(running ? total : 0);
-    statusUptime.textContent = `${uptime}s`;
-
-    const fromStatusPerFile = Number(data.events_per_file || 0);
-    const saved = loadMainFormState();
-    const fromSavedPerFile = Number(saved?.events_per_file || 0);
-    const perFile = fromStatusPerFile > 0 ? fromStatusPerFile : (fromSavedPerFile > 0 ? fromSavedPerFile : eventsPerFileDefault);
-    const fromStatusInFile = Number(data.events_in_file || 0);
-    let inFile = 0;
-    if (running && fromStatusInFile > 0) {
-      inFile = fromStatusInFile;
-    } else if (perFile > 0 && running) {
-      inFile = total % perFile;
-      if (inFile === 0 && total > 0) {
-        inFile = perFile;
-      }
-    }
-    const ratio = perFile > 0 ? Math.max(0, Math.min(1, inFile / perFile)) : 0;
-    statusFileProgressText.textContent = `${inFile} / ${perFile}`;
-    statusFileProgressFill.style.width = `${Math.round(ratio * 100)}%`;
-  } catch (e) {
-    stateLamp.className = 'lamp bad';
-    statusState.textContent = 'daqd unreachable';
-    statusRun.textContent = '-';
-    statusSubrun.textContent = '-';
-    statusEventsTotal.textContent = '0';
-    statusUptime.textContent = '0s';
-    statusFileProgressText.textContent = '0 / 0';
-    statusFileProgressFill.style.width = '0%';
-    setMessage(`status error: ${e.message}`, false);
-  }
-}
-
-async function fetchNextRun(force = false) {
-  const now = Date.now();
-  if (!force && cachedNextRun !== null && (now - cachedNextRunAtMs) < 5000) {
-    return cachedNextRun;
-  }
-  const data = await callApi('/api/next-run');
-  cachedNextRun = Number(data.next_run);
-  cachedNextRunAtMs = now;
-  return cachedNextRun;
+  await window.SimpleDaqStatusPanel.refreshGlobalStatus({
+    fetchJson: callApi,
+    eventsPerFileDefault,
+    setMessage,
+  });
 }
 
 function updateAutoRefresh() {
@@ -287,7 +170,9 @@ if (viewSummaryInput) {
   viewSummaryInput.addEventListener('change', refreshRunLog);
 }
 
-ensureStatusPanelElements();
+if (window.SimpleDaqStatusPanel && typeof window.SimpleDaqStatusPanel.mountGlobalStatusPanel === 'function') {
+  window.SimpleDaqStatusPanel.mountGlobalStatusPanel();
+}
 updateViewLabels();
 loadUiConfig().then(() => setSelectedAnalysis(null)).then(refreshRunLog);
 refreshStatus();

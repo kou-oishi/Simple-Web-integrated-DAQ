@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <fstream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -49,6 +50,21 @@ class FileFrameSource : public IFrameSource {
   bool opened_ = false;
   bool eof_ = false;
   std::ifstream ifs_;
+};
+
+class MultiFileFrameSource : public IFrameSource {
+ public:
+  MultiFileFrameSource(std::vector<std::string> paths, std::size_t frame_size);
+
+  SourceStatus NextFrame(FrameEnvelope& out_frame,
+                         std::string& error_text,
+                         const volatile std::sig_atomic_t* stop_requested = nullptr) override;
+
+ private:
+  std::vector<std::string> paths_;
+  std::size_t frame_size_;
+  std::size_t current_index_ = 0;
+  std::unique_ptr<FileFrameSource> current_source_;
 };
 
 class LiveRunFileSource : public IFrameSource {

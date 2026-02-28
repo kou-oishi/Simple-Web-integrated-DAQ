@@ -1,13 +1,38 @@
 #include "monitor/sink.hpp"
 
+#include <ctime>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 
-TextSink::TextSink(IDecoder* decoder, std::string output_path, uint64_t print_every, bool print_summary)
+namespace {
+
+std::string current_timestamp_text() {
+  const std::time_t now = std::time(nullptr);
+  std::tm tm_value{};
+#if defined(_WIN32)
+  localtime_s(&tm_value, &now);
+#else
+  localtime_r(&now, &tm_value);
+#endif
+  std::ostringstream oss;
+  oss << std::put_time(&tm_value, "%Y-%m-%d %H:%M:%S");
+  return oss.str();
+}
+
+}  // namespace
+
+TextSink::TextSink(IDecoder* decoder,
+                   std::string output_path,
+                   uint64_t print_every,
+                   bool print_summary,
+                   bool with_timestamp)
     : decoder_(decoder),
       output_path_(std::move(output_path)),
       use_stdout_(output_path_.empty() || output_path_ == "-"),
       print_every_(print_every == 0 ? 1 : print_every),
-      print_summary_(print_summary) {}
+      print_summary_(print_summary),
+      with_timestamp_(with_timestamp) {}
 
 bool TextSink::EnsureOpen(std::string& error_text) {
   error_text.clear();
@@ -50,6 +75,9 @@ bool TextSink::Consume(const DecodedMessage& message, std::string& error_text) {
   }
 
   if (use_stdout_) {
+    if (with_timestamp_) {
+      std::cout << "[" << current_timestamp_text() << "] ";
+    }
     std::cout << "run=" << message.run_number << " subrun=" << message.subrun_number
               << " event=" << message.event_number;
     if (!text.empty()) {
@@ -60,6 +88,9 @@ bool TextSink::Consume(const DecodedMessage& message, std::string& error_text) {
     return true;
   }
 
+  if (with_timestamp_) {
+    ofs_ << "[" << current_timestamp_text() << "] ";
+  }
   ofs_ << "run=" << message.run_number << " subrun=" << message.subrun_number
        << " event=" << message.event_number;
   if (!text.empty()) {

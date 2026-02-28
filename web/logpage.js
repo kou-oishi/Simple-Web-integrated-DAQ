@@ -26,6 +26,7 @@
   let loadingOlder = false;
   let hasMoreOlder = true;
   let refreshTimer = null;
+  let eventsPerFileDefault = 0;
 
   function isNearBottom(el, thresholdPx = 8) {
     const remain = el.scrollHeight - el.scrollTop - el.clientHeight;
@@ -57,6 +58,23 @@
       throw new Error((data && data.detail) ? JSON.stringify(data.detail) : `HTTP ${res.status}`);
     }
     return data;
+  }
+
+  function setMessage(text, ok = true) {
+    if (!window.SimpleDaqStatusPanel || typeof window.SimpleDaqStatusPanel.ensureElements !== 'function') return;
+    const elements = window.SimpleDaqStatusPanel.ensureElements();
+    if (!elements || !elements.msg) return;
+    elements.msg.className = 'msg status-msg ' + (ok ? 'ok' : 'err');
+    elements.msg.textContent = text || '';
+  }
+
+  async function refreshStatus() {
+    if (!window.SimpleDaqStatusPanel || typeof window.SimpleDaqStatusPanel.refreshGlobalStatus !== 'function') return;
+    await window.SimpleDaqStatusPanel.refreshGlobalStatus({
+      fetchJson: callApi,
+      eventsPerFileDefault,
+      setMessage,
+    });
   }
 
   function getSelectedLevels() {
@@ -163,6 +181,7 @@
   async function loadUiConfigLimit() {
     try {
       const cfg = await callApi('/api/ui-config');
+      eventsPerFileDefault = Math.max(0, Number(cfg.events_per_file || 0));
       if (apiPath.includes('/api/daqd/log')) {
         pageSize = Number(cfg.daqd_log_limit || pageSize);
       } else if (apiPath.includes('/api/monitor/log')) {
@@ -267,9 +286,16 @@
   }
 
   renderQuickTokens();
+  if (window.SimpleDaqStatusPanel && typeof window.SimpleDaqStatusPanel.mountGlobalStatusPanel === 'function') {
+    window.SimpleDaqStatusPanel.mountGlobalStatusPanel();
+  }
   loadUiConfigLimit()
     .then(() => refreshLog())
     .catch(() => refreshLog());
+  void refreshStatus();
+  window.setInterval(() => {
+    void refreshStatus();
+  }, 1000);
 
   setInterval(() => {
     if (!logView || loadingOlder) return;

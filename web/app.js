@@ -215,9 +215,11 @@ function setActionButtonsByState(state, running) {
 function setMonitorControlsByState(running) {
   monitorRunning = running;
   const btnStart = document.getElementById('btn_start_datamon');
+  const btnRestart = document.getElementById('btn_restart_datamon');
   const btnShutdown = document.getElementById('btn_shutdown_datamon');
   const snapshotIntervalInput = document.getElementById('monitor_snapshot_interval_sec');
   if (btnStart) btnStart.disabled = running;
+  if (btnRestart) btnRestart.disabled = !running;
   if (btnShutdown) btnShutdown.disabled = !running;
   if (snapshotIntervalInput) snapshotIntervalInput.disabled = running;
   const decoderInputs = monitorDecoders ? monitorDecoders.querySelectorAll('input[type="checkbox"]') : [];
@@ -950,6 +952,17 @@ async function stopDatamonFromWeb() {
   }
 }
 
+async function restartDatamonFromWeb() {
+  try {
+    const payload = buildMonitorStartPayload();
+    const data = await callApi('/api/monitor/restart', 'POST', payload);
+    setMessage(data.result || 'datamon restarted', true);
+    await refreshWholeUi();
+  } catch (e) {
+    setMessage(`failed to restart monitor: ${e.message}`, false);
+  }
+}
+
 document.getElementById('btn_start_daqd').addEventListener('click', startDaqdFromWeb);
 document.getElementById('btn_force_restart_daqd').addEventListener('click', forceRestartDaqdFromWeb);
 document.getElementById('btn_start').addEventListener('click', async () => {
@@ -969,6 +982,7 @@ document.getElementById('btn_shutdown').addEventListener('click', async () => {
   await runCommand('/api/shutdown');
 });
 document.getElementById('btn_start_datamon').addEventListener('click', startDatamonFromWeb);
+document.getElementById('btn_restart_datamon').addEventListener('click', restartDatamonFromWeb);
 document.getElementById('btn_shutdown_datamon').addEventListener('click', stopDatamonFromWeb);
 document.getElementById('btn_refresh_status').addEventListener('click', refreshStatus);
 document.getElementById('btn_reload_default_setup').addEventListener('click', reloadDefaultSetup);

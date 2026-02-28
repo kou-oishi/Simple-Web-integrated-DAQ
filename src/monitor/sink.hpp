@@ -17,7 +17,7 @@ class IEventSink {
 
 class TextSink : public IEventSink {
  public:
-  TextSink(IDecoder* decoder, std::string output_path, uint64_t print_every, bool print_summary);
+  TextSink(IDecoder* decoder, std::string output_path, uint64_t print_every, bool print_summary, bool with_timestamp);
 
   bool Consume(const DecodedMessage& message, std::string& error_text) override;
   bool Finalise(std::string& error_text) override;
@@ -32,4 +32,5 @@ class TextSink : public IEventSink {
   uint64_t print_every_;
   uint64_t seen_ = 0;
   bool print_summary_ = true;
+  bool with_timestamp_ = false;
 };

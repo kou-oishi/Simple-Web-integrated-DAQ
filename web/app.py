@@ -1099,6 +1099,12 @@ def stop_datamon() -> dict[str, Any]:
     return {"result": f"datamon stopped (exit={rc})", "exit_code": int(rc)}
 
 
+@app.post("/api/monitor/restart")
+def restart_datamon(req: MonitorStartRequest) -> dict[str, Any]:
+    _ = stop_datamon()
+    return start_datamon(req)
+
+
 @app.get("/api/ui-config")
 def get_ui_config() -> dict[str, Any]:
     title = str(WEB_CONFIG.get("title", "DAQ Control"))
@@ -1320,6 +1326,29 @@ def get_next_run() -> dict[str, int]:
 
 @app.post("/api/start")
 def start_daq(req: StartRequest) -> dict[str, Any]:
+    monitor_running, _monitor_pid = _is_datamon_running()
+    if not monitor_running:
+        try:
+            monitor_start_result = start_datamon(MonitorStartRequest())
+        except HTTPException as ex:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "failed to auto-start monitor before daq start",
+                    "monitor_detail": ex.detail,
+                },
+            ) from ex
+        monitor_running, monitor_pid = _is_datamon_running()
+        if not monitor_running:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "failed to auto-start monitor before daq start",
+                    "monitor_result": monitor_start_result,
+                    "pid": monitor_pid,
+                },
+            )
+
     output_dir = req.output_dir or str(WEB_CONFIG.get("output_dir", "./output"))
     devices_input = req.devices if req.devices is not None else WEB_CONFIG.get("devices", [])
     if not isinstance(devices_input, list) or not devices_input:
