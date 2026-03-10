@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -26,7 +27,7 @@ class Kc705TofDecoder final : public IDecoder {
  private:
   static bool frame_to_event(const std::vector<uint8_t>& frame, Kc705TofEvent& out_event, std::string& error_text);
 
-  size_t num_periodic_events[4] = {0};
+  std::array<size_t, Kc705TofPeriodicChannelCount()> num_periodic_events_{};
 };
 
 class Kc705TofDecoderFactory final : public IMonitorDecoderFactory {

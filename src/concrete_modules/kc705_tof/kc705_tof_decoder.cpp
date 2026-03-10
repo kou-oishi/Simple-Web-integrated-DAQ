@@ -102,20 +102,13 @@ bool Kc705TofDecoder::FormatDecoded(const DecodedMessage& message,
       << " ch=" << static_cast<unsigned>(Event.channel_id)
       << " time=" << Event.time;
 
-  // Skip the periodic channels
-  if(Event.channel_id == 1  || Event.channel_id == 2 || Event.channel_id == 7 || Event.channel_id == 8) {
-    size_t pch_idx = 0;
-    switch (Event.channel_id) {
-      case 1: pch_idx = 0; break;
-      case 2: pch_idx = 1; break;
-      case 7: pch_idx = 2; break;
-      case 8: pch_idx = 3; break;
-    }
-    num_periodic_events[pch_idx]++;
-    if (num_periodic_events[pch_idx] % (1000) == 1) {  
-      oss << " [prescaled: " << num_periodic_events[pch_idx] << " th event of this channel]";
+  if (const auto periodic_index = PeriodicChannelIndex(Event.channel_id); periodic_index.has_value()) {
+    const std::size_t pch_idx = *periodic_index;
+    ++num_periodic_events_[pch_idx];
+    if (num_periodic_events_[pch_idx] % 1000 == 1) {
+      oss << " [prescaled: " << num_periodic_events_[pch_idx] << " th event of this channel]";
     } else {
-      out_quiet = true;  // Don't print every periodic event
+      out_quiet = true;
       return true;
     }
   }

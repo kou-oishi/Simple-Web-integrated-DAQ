@@ -246,7 +246,7 @@ int create_listen_socket(const Config& cfg) {
 }
 
 uint64_t build_word(uint8_t board_id, uint8_t channel_id, uint64_t value56) {
-  const uint64_t board = (static_cast<uint64_t>(board_id) & 0x7ULL) << 61;
+  const uint64_t board   = (static_cast<uint64_t>(board_id) & 0x7ULL) << 61;
   const uint64_t channel = (static_cast<uint64_t>(channel_id) & 0x1FULL) << 56;
   const uint64_t value = value56 & 0x00FFFFFFFFFFFFFFULL;
   return board | channel | value;

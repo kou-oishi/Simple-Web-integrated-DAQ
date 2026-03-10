@@ -1,9 +1,12 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "concrete_modules/kc705_tof/kc705_tof_types.hpp"
 #include "monitor/realtime_analysis.hpp"
@@ -32,11 +35,16 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
   std::unique_ptr<TCanvas> canvas_board_;
   std::unique_ptr<TCanvas> canvas_channel_;
   std::unique_ptr<TCanvas> canvas_trend_;
+  std::unique_ptr<TCanvas> canvas_periodic_rate_trend_;
   std::unique_ptr<TCanvas> canvas_tofs_;
   std::unique_ptr<TH1D> hist_board_;
   std::unique_ptr<TH1D> hist_channel_;
   std::vector<std::unique_ptr<TH1D>> hist_tofs_;
   std::unique_ptr<TGraph> graph_trend_;
+  std::array<std::unique_ptr<TGraph>, Kc705TofPeriodicChannelCount()> periodic_rate_graphs_;
+  std::array<std::deque<Double_t>, Kc705TofPeriodicChannelCount()> periodic_event_times_;
+  Double_t periodic_min_time_ = 1e100;
+  Double_t periodic_max_time_ = -1e100;
 };
 
 class Kc705TofOverviewAnalysisFactory final : public IMonitorRealtimeAnalysisFactory {
