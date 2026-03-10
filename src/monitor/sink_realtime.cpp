@@ -217,9 +217,12 @@ bool RealtimeAnalysisSink::RedrawAll(std::string& error_text) {
       continue;
     }
     binding.pad->cd();
+    const Int_t previous_error_level = gErrorIgnoreLevel;
+    gErrorIgnoreLevel = kWarning;
     binding.object->Draw(binding.draw_option.c_str());
     binding.pad->Modified();
     binding.pad->Update();
+    gErrorIgnoreLevel = previous_error_level;
   }
 #endif
   return true;
