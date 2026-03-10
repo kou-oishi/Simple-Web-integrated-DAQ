@@ -12,8 +12,8 @@
 #include "monitor/realtime_analysis.hpp"
 
 class TH1D;
-class TGraph;
 class TCanvas;
+class TGraph;
 
 class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEvent> {
  public:
@@ -34,17 +34,21 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
   
   std::unique_ptr<TCanvas> canvas_board_;
   std::unique_ptr<TCanvas> canvas_channel_;
-  std::unique_ptr<TCanvas> canvas_trend_;
+  std::unique_ptr<TCanvas> canvas_channel_named_;
   std::unique_ptr<TCanvas> canvas_periodic_rate_trend_;
+  std::unique_ptr<TCanvas> canvas_tdcs_;
   std::unique_ptr<TCanvas> canvas_tofs_;
   std::unique_ptr<TH1D> hist_board_;
   std::unique_ptr<TH1D> hist_channel_;
+  std::unique_ptr<TH1D> hist_channel_named_;
+  std::vector<std::unique_ptr<TH1D>> hist_tdcs_;
   std::vector<std::unique_ptr<TH1D>> hist_tofs_;
-  std::unique_ptr<TGraph> graph_trend_;
   std::array<std::unique_ptr<TGraph>, Kc705TofPeriodicChannelCount()> periodic_rate_graphs_;
   std::array<std::deque<Double_t>, Kc705TofPeriodicChannelCount()> periodic_event_times_;
-  Double_t periodic_min_time_ = 1e100;
-  Double_t periodic_max_time_ = -1e100;
+  std::array<Double_t, 2> last_periodic_time_ms_ = {0.0, 0.0};
+  std::array<Double_t, 2> first_periodic_time_ms_ = {0.0, 0.0};
+  std::array<bool, 2> has_last_periodic_time_ms_ = {false, false};
+  std::array<bool, 2> has_first_periodic_time_ms_ = {false, false};
 };
 
 class Kc705TofOverviewAnalysisFactory final : public IMonitorRealtimeAnalysisFactory {

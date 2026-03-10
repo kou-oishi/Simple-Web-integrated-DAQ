@@ -1,8 +1,8 @@
 #pragma once
 
 #include <array>
-#include <cstdint>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 
 #include "monitor/decoded_event.hpp"
@@ -18,6 +18,50 @@ struct Kc705TofEvent : public DecodedEventBase {
   uint8_t channel_id = 0;
   Double_t time = 0.0;
 };
+
+struct Kc705TofChannelDef {
+  uint8_t channel_id = 0;
+  const char* name = "";
+};
+
+inline constexpr std::array<Kc705TofChannelDef, 9> kKc705TofChannelDefs = {{
+    {3,  "RECBE 1"},
+    {2,  "RECBE 2"},
+    {9,  "RECBE 3"},
+    {8,  "MKii v1 1"},
+    {6,  "MKii v1 2"},
+    {12, "MKii v2"},
+    {4,  "ROESTI 1"},
+    {5,  "ROESTI 2"},
+    {10, "ROESTI 3"},
+}};
+
+inline constexpr std::size_t Kc705TofNamedChannelCount() {
+  return kKc705TofChannelDefs.size();
+}
+
+inline constexpr const Kc705TofChannelDef* FindKc705TofChannelDef(uint8_t channel_id) {
+  for (const auto& channel_def : kKc705TofChannelDefs) {
+    if (channel_def.channel_id == channel_id) {
+      return &channel_def;
+    }
+  }
+  return nullptr;
+}
+
+inline constexpr const char* Kc705TofChannelName(uint8_t channel_id) {
+  const auto* channel_def = FindKc705TofChannelDef(channel_id);
+  return channel_def != nullptr ? channel_def->name : "Unknown";
+}
+
+inline constexpr std::optional<std::size_t> Kc705TofChannelSortIndex(uint8_t channel_id) {
+  for (std::size_t i = 0; i < kKc705TofChannelDefs.size(); ++i) {
+    if (kKc705TofChannelDefs[i].channel_id == channel_id) {
+      return i;
+    }
+  }
+  return std::nullopt;
+}
 
 inline constexpr std::array<uint8_t, 2> kKc705TofPeriodicChannels = {1, 7};
 

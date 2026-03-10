@@ -1,6 +1,6 @@
 #include "concrete_modules/kc705_tof/kc705_tof_decoder.hpp"
 
-#include <sstream>
+#include <cstdio>
 
 namespace {
 
@@ -97,22 +97,32 @@ bool Kc705TofDecoder::FormatDecoded(const DecodedMessage& message,
     return false;
   }
 
-  std::ostringstream oss;
-  oss << "board=" << static_cast<unsigned>(Event.board_id) 
-      << " ch=" << static_cast<unsigned>(Event.channel_id)
-      << " time=" << Event.time;
+  char buffer[256] = {};
+  std::snprintf(buffer,
+                sizeof(buffer),
+                "board=%u ch=%2u (%-12s) time=%.6f",
+                static_cast<unsigned>(Event.board_id),
+                static_cast<unsigned>(Event.channel_id),
+                Kc705TofChannelName(Event.channel_id),
+                static_cast<double>(Event.time));
 
   if (const auto periodic_index = PeriodicChannelIndex(Event.channel_id); periodic_index.has_value()) {
     const std::size_t pch_idx = *periodic_index;
     ++num_periodic_events_[pch_idx];
     if (num_periodic_events_[pch_idx] % 1000 == 1) {
-      oss << " [prescaled: " << num_periodic_events_[pch_idx] << " th event of this channel]";
+      char prescaled_buffer[96] = {};
+      std::snprintf(prescaled_buffer,
+                    sizeof(prescaled_buffer),
+                    " [prescaled: %zu th event of this channel]",
+                    num_periodic_events_[pch_idx]);
+      out_text = std::string(buffer) + prescaled_buffer;
     } else {
       out_quiet = true;
       return true;
     }
+  } else {
+    out_text = buffer;
   }
-  out_text = oss.str();
   return true;
 }
 
