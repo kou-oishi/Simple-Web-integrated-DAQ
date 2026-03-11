@@ -49,6 +49,7 @@ bool MonitorPipeline::Run(uint64_t max_events,
     message.run_number = frame.run_number;
     message.subrun_number = frame.subrun_number;
     message.event_number = frame.event_number;
+    message.is_historical_replay = frame.is_historical_replay;
     if (!decoder_->DecodeFrame(frame.payload, message, error_text)) {
       (void)finalise_sinks(error_text);
       return false;

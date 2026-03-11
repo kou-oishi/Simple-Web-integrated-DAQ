@@ -4,7 +4,7 @@ project(SimpleDAQ LANGUAGES CXX)
 include(GNUInstallDirs)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBZMQ REQUIRED IMPORTED_TARGET libzmq)
-find_package(ROOT QUIET COMPONENTS Core RIO Tree Hist Graf Gpad)
+find_package(ROOT QUIET COMPONENTS Core RIO Tree Hist Graf Gpad Rint)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -70,6 +70,7 @@ if(ROOT_FOUND)
     ROOT::Hist
     ROOT::Graf
     ROOT::Gpad
+    ROOT::Rint
   )
 endif()
 
@@ -127,6 +128,7 @@ target_link_libraries(daqmon PRIVATE daq_control_api)
 target_include_directories(daqmon PRIVATE src)
 
 add_executable(datamon src/control/datamon.cpp)
+target_link_libraries(datamon PRIVATE daq_control_api)
 link_whole_archive_if_supported(datamon daq_monitor)
 target_include_directories(datamon PRIVATE src)
 apply_simpledaq_root_define(datamon)

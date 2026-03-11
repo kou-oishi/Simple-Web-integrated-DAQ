@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "concrete_modules/module_registry.hpp"
+#include "control_api/zmq_status_subscriber.hpp"
 #include "core/defaults.hpp"
 #include "monitor/decoder.hpp"
 #include "monitor/frame_source.hpp"
@@ -54,8 +55,41 @@ struct Options {
   std::string snapshot_dir;
   uint32_t snapshot_interval_ms = 1000;
   std::string snapshot_select_endpoint;
+  std::string status_endpoint;
+  bool replay_current_run = false;
   bool list_modules = false;
   bool json_output = false;
+};
+
+class ChainedFrameSource final : public IFrameSource {
+ public:
+  ChainedFrameSource(std::unique_ptr<IFrameSource> first, std::unique_ptr<IFrameSource> second)
+      : first_(std::move(first)), second_(std::move(second)) {}
+
+  SourceStatus NextFrame(FrameEnvelope& out_frame,
+                         std::string& error_text,
+                         const volatile std::sig_atomic_t* stop_requested = nullptr) override {
+    if (!first_finished_) {
+      const SourceStatus st = first_->NextFrame(out_frame, error_text, stop_requested);
+      if (st != SourceStatus::kEof) {
+        if (st == SourceStatus::kOk) {
+          out_frame.is_historical_replay = true;
+        }
+        return st;
+      }
+      first_finished_ = true;
+    }
+    const SourceStatus st = second_->NextFrame(out_frame, error_text, stop_requested);
+    if (st == SourceStatus::kOk) {
+      out_frame.is_historical_replay = false;
+    }
+    return st;
+  }
+
+ private:
+  std::unique_ptr<IFrameSource> first_;
+  std::unique_ptr<IFrameSource> second_;
+  bool first_finished_ = false;
 };
 
 std::string json_escape(const std::string& text) {
@@ -164,6 +198,8 @@ void print_usage(const char* prog) {
   std::cerr << "      --snapshot-dir <dir>      Save analysis canvas snapshots as PNG files\n";
   std::cerr << "      --snapshot-interval-ms <n> Snapshot interval in milliseconds (default: 1000)\n";
   std::cerr << "      --snapshot-select-endpoint <ep> ZMQ REP endpoint for selected analysis control\n";
+  std::cerr << "      --status-endpoint <ep>    Status endpoint used by --replay-current-run\n";
+  std::cerr << "      --replay-current-run      Preload current run from raw .dat before live endpoint mode\n";
   std::cerr << "      --list-modules            Print available decoders and analyses, then exit\n";
   std::cerr << "      --json                    Use JSON output with --list-modules\n";
   std::cerr << "  -h, --help                    Show this help\n";
@@ -232,6 +268,61 @@ std::string make_per_input_root_path(const std::string& dec_dir, const std::stri
   return (std::filesystem::path(dec_dir) / (stem + ".root")).string();
 }
 
+bool parse_status_u32_field(const std::string& payload, const std::string& key, uint32_t& out) {
+  const std::string pattern = key + "=";
+  const std::size_t pos = payload.find(pattern);
+  if (pos == std::string::npos) {
+    return false;
+  }
+  std::size_t value_begin = pos + pattern.size();
+  std::size_t value_end = value_begin;
+  while (value_end < payload.size() && payload[value_end] != ' ') {
+    ++value_end;
+  }
+  return parse_uint32(payload.substr(value_begin, value_end - value_begin), out);
+}
+
+bool query_current_run_subrun(const std::string& status_endpoint,
+                              uint32_t& out_run,
+                              uint32_t& out_subrun,
+                              std::string& error_text) {
+  out_run = 0;
+  out_subrun = 0;
+  error_text.clear();
+
+  ZmqStatusSubscriber sub(status_endpoint);
+  if (!sub.Connect(error_text)) {
+    return false;
+  }
+
+  std::string payload;
+  if (!sub.ReceiveNext(payload, error_text)) {
+    return false;
+  }
+
+  if (!parse_status_u32_field(payload, "Run", out_run) || !parse_status_u32_field(payload, "subrun", out_subrun)) {
+    error_text = "status payload did not contain Run/subrun: " + payload;
+    return false;
+  }
+  return true;
+}
+
+void append_existing_subrun_files(const std::string& raw_dir,
+                                  uint32_t run_number,
+                                  uint32_t subrun_end_inclusive,
+                                  std::vector<std::string>& out_files) {
+  out_files.clear();
+  for (uint32_t subrun = 0; subrun <= subrun_end_inclusive; ++subrun) {
+    const std::string path = make_run_subrun_path(raw_dir, run_number, subrun);
+    if (std::filesystem::exists(path)) {
+      out_files.push_back(path);
+    }
+    if (subrun == 0xFFFFFFFFU) {
+      break;
+    }
+  }
+}
+
 bool append_run_selected_files(const std::string& raw_dir,
                                uint32_t run_begin,
                                uint32_t run_end,
@@ -296,6 +387,8 @@ bool parse_args(int argc, char** argv, Options& options) {
       {"snapshot-dir", required_argument, nullptr, 1003},
       {"snapshot-interval-ms", required_argument, nullptr, 1004},
       {"snapshot-select-endpoint", required_argument, nullptr, 1005},
+      {"status-endpoint", required_argument, nullptr, 1006},
+      {"replay-current-run", no_argument, nullptr, 1007},
       {"raw-dir", required_argument, nullptr, 1008},
       {"dec-dir", required_argument, nullptr, 1009},
       {"list-modules", no_argument, nullptr, 1000},
@@ -332,6 +425,12 @@ bool parse_args(int argc, char** argv, Options& options) {
         break;
       case 1005:
         options.snapshot_select_endpoint = optarg;
+        break;
+      case 1006:
+        options.status_endpoint = optarg;
+        break;
+      case 1007:
+        options.replay_current_run = true;
         break;
       case 'r':
         if (!parse_u32_range(optarg, options.run_start_number, options.run_end_number)) {
@@ -451,6 +550,21 @@ bool parse_args(int argc, char** argv, Options& options) {
       return false;
     }
     options.input_files = selected_files;
+  }
+
+  if (options.replay_current_run && options.raw_dir.empty()) {
+    const char* env_raw = std::getenv("RAWDIR");
+    if (env_raw != nullptr) {
+      options.raw_dir = env_raw;
+    }
+  }
+  if (options.replay_current_run && options.raw_dir.empty()) {
+    std::cerr << "--replay-current-run requires --raw-dir or RAWDIR environment variable\n";
+    return false;
+  }
+  if (options.replay_current_run && options.status_endpoint.empty()) {
+    const char* env_status = std::getenv("SIMPLEDAQ_STATUS_ENDPOINT");
+    options.status_endpoint = (env_status != nullptr) ? env_status : daq_defaults::kStatusEndpoint;
   }
 
   if (!options.dec_dir.empty() && !options.root_out_requested) {
@@ -749,7 +863,36 @@ int main(int argc, char** argv) {
         source = std::make_unique<MultiFileFrameSource>(options.input_files, frame_size);
       }
     } else {
-      source = std::make_unique<ZmqDataFrameSource>(options.data_endpoint, options.poll_ms, options.idle_timeout_sec);
+      auto live_source = std::make_unique<ZmqDataFrameSource>(options.data_endpoint, options.poll_ms, options.idle_timeout_sec);
+      if (!options.replay_current_run) {
+        source = std::move(live_source);
+      } else {
+        uint32_t current_run = 0;
+        uint32_t current_subrun = 0;
+        if (!query_current_run_subrun(options.status_endpoint, current_run, current_subrun, error_text)) {
+          std::cerr << "Failed to query current run from status endpoint: " << error_text << "\n";
+          return 1;
+        }
+        std::vector<std::string> replay_files;
+        if (current_subrun > 0) {
+          append_existing_subrun_files(options.raw_dir, current_run, current_subrun - 1, replay_files);
+        }
+        if (!options.no_console) {
+          std::cout << "live replay bootstrap: run=" << current_run << " subrun=" << current_subrun
+                    << " replay_files=" << replay_files.size() << "\n";
+        }
+        if (replay_files.empty()) {
+          source = std::move(live_source);
+        } else if (replay_files.size() == 1) {
+          source = std::make_unique<ChainedFrameSource>(
+              std::make_unique<FileFrameSource>(replay_files.front(), frame_size),
+              std::move(live_source));
+        } else {
+          source = std::make_unique<ChainedFrameSource>(
+              std::make_unique<MultiFileFrameSource>(replay_files, frame_size),
+              std::move(live_source));
+        }
+      }
     }
     MonitorPipeline pipeline(std::move(source), std::move(decoder), std::move(sinks));
     error_text.clear();

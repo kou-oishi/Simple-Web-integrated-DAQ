@@ -293,6 +293,13 @@ def _datamon_base_args() -> list[str]:
     return args
 
 
+def _resolve_raw_dir_for_datamon() -> str:
+    configured = WEB_CONFIG.get("raw_dir") or WEB_CONFIG.get("datamon_raw_dir") or os.getenv("RAWDIR")
+    if not configured:
+        return ""
+    return str(_resolve_repo_path(str(configured)))
+
+
 def _mysql_base_args() -> tuple[list[str], dict[str, str]]:
     host = os.getenv("SIMPLEDAQ_MYSQL_HOST") or DEFAULTS.get("kMySqlHost") or "127.0.0.1"
     port = os.getenv("SIMPLEDAQ_MYSQL_PORT") or DEFAULTS.get("kMySqlPort") or "3306"
@@ -966,6 +973,10 @@ def start_datamon(req: MonitorStartRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail={"error": f"unsupported decoder '{decoder}'"})
 
     args = [*_datamon_base_args(), "--decoder", decoder, "--text-stream", "--no-gui"]
+    raw_dir = _resolve_raw_dir_for_datamon()
+    status_endpoint = os.getenv("SIMPLEDAQ_STATUS_ENDPOINT") or DEFAULTS.get("kStatusEndpoint") or "ipc:///tmp/simpledaq_status.sock"
+    if raw_dir:
+        args.extend(["--raw-dir", raw_dir, "--status-endpoint", status_endpoint, "--replay-current-run"])
     snapshot_dir = str(WEB_CONFIG.get("datamon_snapshot_dir", "/tmp/daq_monitors"))
     args.extend(["--snapshot-dir", str(_resolve_repo_path(snapshot_dir))])
     snapshot_interval_ms: int | None = None

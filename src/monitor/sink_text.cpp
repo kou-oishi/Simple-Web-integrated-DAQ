@@ -60,6 +60,10 @@ bool TextSink::Consume(const DecodedMessage& message, std::string& error_text) {
     return false;
   }
 
+  if (message.is_historical_replay) {
+    return true;
+  }
+
   ++seen_;
   if (seen_ % print_every_ != 0) {
     return true;

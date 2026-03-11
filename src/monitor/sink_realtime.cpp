@@ -1,6 +1,7 @@
 #include "monitor/sink_realtime.hpp"
 
 #include <filesystem>
+#include <set>
 #include <thread>
 #include <utility>
 
@@ -13,6 +14,7 @@
 #include <TGraph.h>
 #include <TObject.h>
 #include <TROOT.h>
+#include <TRint.h>
 #include <TSystem.h>
 #include <TVirtualPad.h>
 
@@ -133,7 +135,11 @@ bool RealtimeAnalysisSink::EnsureInitialised(std::string& error_text) {
     static int argc = 1;
     static char arg0[] = "datamon";
     static char* argv[] = {arg0, nullptr};
-    app_ = new TApplication("datamon_realtime", &argc, argv);
+    if (redraw_only_on_finalise_) {
+      app_ = new TRint("datamon_realtime", &argc, argv, nullptr, 0, kTRUE, kFALSE);
+    } else {
+      app_ = new TApplication("datamon_realtime", &argc, argv);
+    }
   }
 
   RootDisplayRegistry registry(*this);
@@ -300,6 +306,14 @@ void RealtimeAnalysisSink::SaveSnapshots() {
   if (ec) {
     return;
   }
+  const std::string analysis_dir =
+      SanitisePathPart(selected_analysis_name_.empty() ? "default" : selected_analysis_name_);
+  const std::filesystem::path out_dir = std::filesystem::path(snapshot_dir_) / analysis_dir;
+  std::filesystem::create_directories(out_dir, ec);
+  if (ec) {
+    return;
+  }
+  std::set<std::string> expected_png_names;
 
   for (std::size_t i = 0; i < canvases_.size(); ++i) {
     TCanvas* canvas = canvases_[i];
@@ -310,18 +324,33 @@ void RealtimeAnalysisSink::SaveSnapshots() {
     if (analysis != selected_analysis_name_) {
       continue;
     }
-    const std::string analysis_dir = SanitisePathPart(analysis.empty() ? "default" : analysis);
-    const std::filesystem::path out_dir = std::filesystem::path(snapshot_dir_) / analysis_dir;
-    std::filesystem::create_directories(out_dir, ec);
-    if (ec) {
-      continue;
-    }
     const std::string canvas_name = SanitisePathPart(canvas->GetName() == nullptr ? "canvas" : canvas->GetName());
-    const std::filesystem::path out_path = out_dir / (canvas_name + ".png");
+    const std::string png_name = canvas_name + ".png";
+    expected_png_names.insert(png_name);
+    const std::filesystem::path out_path = out_dir / png_name;
     const Int_t previous_error_level = gErrorIgnoreLevel;
     gErrorIgnoreLevel = kWarning;
     canvas->SaveAs(out_path.string().c_str());
     gErrorIgnoreLevel = previous_error_level;
+  }
+  for (const auto& entry : std::filesystem::directory_iterator(out_dir, ec)) {
+    if (ec) {
+      break;
+    }
+    if (!entry.is_regular_file()) {
+      continue;
+    }
+    const std::filesystem::path path = entry.path();
+    if (path.extension() != ".png") {
+      continue;
+    }
+    if (expected_png_names.find(path.filename().string()) != expected_png_names.end()) {
+      continue;
+    }
+    std::filesystem::remove(path, ec);
+    if (ec) {
+      ec.clear();
+    }
   }
 #endif
 }
@@ -460,24 +489,10 @@ bool RealtimeAnalysisSink::Finalise(std::string& error_text) {
   }
   SaveSnapshots();
   if (enable_gui_ && redraw_only_on_finalise_) {
-    while (true) {
-      if (stop_requested_ != nullptr && *stop_requested_ != 0) {
-        break;
-      }
-
-      bool any_canvas_alive = false;
-      for (TCanvas* canvas : canvases_) {
-        if (canvas != nullptr && !canvas->IsBatch() && canvas->GetCanvasImp() != nullptr) {
-          any_canvas_alive = true;
-          break;
-        }
-      }
-      if (!any_canvas_alive) {
-        break;
-      }
-
-      gSystem->ProcessEvents();
-      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    TApplication* root_app = app_ != nullptr ? app_ : gApplication;
+    if (root_app != nullptr) {
+      root_app->SetReturnFromRun(kTRUE);
+      root_app->Run(kTRUE);
     }
   }
 #endif
