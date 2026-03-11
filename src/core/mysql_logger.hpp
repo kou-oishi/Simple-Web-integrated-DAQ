@@ -25,6 +25,11 @@ class MySqlLogger {
                            const std::string& connected_modules,
                            const std::string& disconnected_modules,
                            std::string& error_text) const;
+  bool GetSubrunStartUnixTime(uint32_t run_number,
+                              uint32_t subrun_number,
+                              double& out_unix_time,
+                              bool& out_found,
+                              std::string& error_text) const;
   bool ResolveRunNumber(bool run_number_specified,
                         uint32_t requested_run_number,
                         uint32_t& out_run_number,

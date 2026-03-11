@@ -100,7 +100,7 @@ target_link_libraries(daq_control_api PUBLIC PkgConfig::LIBZMQ)
 target_include_directories(daq_control_api PUBLIC src)
 
 add_library(daq_monitor ${MONITOR_SOURCES})
-target_link_libraries(daq_monitor PRIVATE PkgConfig::LIBZMQ)
+target_link_libraries(daq_monitor PUBLIC daq_core_drivers PRIVATE PkgConfig::LIBZMQ)
 target_include_directories(daq_monitor PUBLIC src)
 if(DAQ_MONITOR_ROOT_SOURCES)
   target_sources(daq_monitor PRIVATE ${DAQ_MONITOR_ROOT_SOURCES})

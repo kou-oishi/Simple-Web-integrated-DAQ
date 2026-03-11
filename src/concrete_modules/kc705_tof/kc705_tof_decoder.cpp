@@ -1,5 +1,6 @@
 #include "concrete_modules/kc705_tof/kc705_tof_decoder.hpp"
 
+#include <limits>
 #include <cstdio>
 
 namespace {
@@ -25,6 +26,46 @@ bool message_to_event(const DecodedMessage& message, Kc705TofEvent& out_event, s
 }
 
 }  // namespace
+
+bool Kc705TofDecoder::PrepareSubrunContext(uint32_t run_number,
+                                           uint32_t subrun_number,
+                                           std::string& error_text) const {
+  error_text.clear();
+  if (subrun_context_loaded_ && active_run_number_ == run_number && active_subrun_number_ == subrun_number) {
+    return true;
+  }
+
+  active_run_number_ = run_number;
+  active_subrun_number_ = subrun_number;
+  subrun_context_loaded_ = true;
+  subrun_start_unix_time_.reset();
+  for (auto& first_periodic_time : first_periodic_time_by_board_) {
+    first_periodic_time.reset();
+  }
+
+  double subrun_start_unix_time = 0.0;
+  bool found = false;
+  if (!mysql_logger_.GetSubrunStartUnixTime(run_number, subrun_number, subrun_start_unix_time, found, error_text)) {
+    return false;
+  }
+  if (found) {
+    subrun_start_unix_time_ = subrun_start_unix_time;
+  }
+  return true;
+}
+
+double Kc705TofDecoder::ComputeUnixTimestamp(const Kc705TofEvent& event) const {
+  if (!subrun_start_unix_time_.has_value() || event.board_id >= first_periodic_time_by_board_.size()) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+
+  const auto& first_periodic_time = first_periodic_time_by_board_[event.board_id];
+  if (!first_periodic_time.has_value()) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+
+  return *subrun_start_unix_time_ + (static_cast<double>(event.time) - *first_periodic_time);
+}
 
 bool Kc705TofDecoder::frame_to_event(const std::vector<uint8_t>& frame,
                                      Kc705TofEvent& out_event,
@@ -66,6 +107,7 @@ std::vector<TreeBranchDef> Kc705TofDecoder::TreeBranches() const {
       {"board_id", TreeValueType::kU64},
       {"channel_id", TreeValueType::kU64},
       {"time", TreeValueType::kF64},
+      {"timestamp", TreeValueType::kF64},
   };
 }
 
@@ -76,13 +118,22 @@ bool Kc705TofDecoder::DecodedToTreeValues(const DecodedMessage& message,
   if (!message_to_event(message, Event, error_text)) {
     return false;
   }
+  if (!PrepareSubrunContext(message.run_number, message.subrun_number, error_text)) {
+    return false;
+  }
+  if (IsPeriodicChannel(Event.channel_id) && Event.board_id < first_periodic_time_by_board_.size() &&
+      !first_periodic_time_by_board_[Event.board_id].has_value()) {
+    first_periodic_time_by_board_[Event.board_id] = static_cast<double>(Event.time);
+  }
+  const double timestamp = ComputeUnixTimestamp(Event);
 
   out_values.clear();
-  out_values.reserve(4);
+  out_values.reserve(5);
   out_values.push_back(TreeValue::FromU64(Event.raw_word));
   out_values.push_back(TreeValue::FromU64(static_cast<uint64_t>(Event.board_id)));
   out_values.push_back(TreeValue::FromU64(static_cast<uint64_t>(Event.channel_id)));
   out_values.push_back(TreeValue::FromF64(static_cast<double>(Event.time)));
+  out_values.push_back(TreeValue::FromF64(timestamp));
   return true;
 }
 

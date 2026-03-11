@@ -80,6 +80,49 @@ bool MySqlLogger::UpdateRunLogModules(uint32_t run_number,
   return ExecuteQuery(sql.str(), error_text);
 }
 
+bool MySqlLogger::GetSubrunStartUnixTime(uint32_t run_number,
+                                         uint32_t subrun_number,
+                                         double& out_unix_time,
+                                         bool& out_found,
+                                         std::string& error_text) const {
+  out_unix_time = 0.0;
+  out_found = false;
+  if (!IsEnabled()) {
+    error_text.clear();
+    return true;
+  }
+
+  std::string cell;
+  std::ostringstream sql;
+  sql << "SELECT UNIX_TIMESTAMP(start_time) FROM `" << daq_defaults::kMySqlRunLogTable << "` "
+      << "WHERE run=" << static_cast<unsigned long long>(run_number)
+      << " AND subrun=" << static_cast<unsigned long long>(subrun_number)
+      << " LIMIT 1";
+  if (!QueryFirstCell(sql.str(), cell, error_text)) {
+    return false;
+  }
+
+  if (cell.empty() || cell == "NULL") {
+    error_text.clear();
+    return true;
+  }
+
+  try {
+    std::size_t pos = 0;
+    out_unix_time = std::stod(cell, &pos);
+    if (pos != cell.size()) {
+      error_text = "invalid UNIX_TIMESTAMP(start_time) response from DB: " + cell;
+      return false;
+    }
+    out_found = true;
+    error_text.clear();
+    return true;
+  } catch (...) {
+    error_text = "failed to parse UNIX_TIMESTAMP(start_time) response from DB: " + cell;
+    return false;
+  }
+}
+
 bool MySqlLogger::ResolveRunNumber(bool run_number_specified,
                                    uint32_t requested_run_number,
                                    uint32_t& out_run_number,
