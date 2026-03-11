@@ -1,5 +1,6 @@
 #pragma once
 
+#include <csignal>
 #include <chrono>
 #include <filesystem>
 #include <memory>
@@ -19,6 +20,8 @@ class RealtimeAnalysisSink : public IEventSink {
   struct Options {
     uint32_t gui_update_interval_ms = 50;
     bool enable_gui = true;
+    bool redraw_only_on_finalise = false;
+    const volatile std::sig_atomic_t* stop_requested = nullptr;
     std::string snapshot_dir;
     uint32_t snapshot_interval_ms = 1000;
     std::string snapshot_select_endpoint;
@@ -63,6 +66,8 @@ class RealtimeAnalysisSink : public IEventSink {
   bool has_active_run_ = false;
   uint32_t active_run_number_ = 0;
   bool enable_gui_ = true;
+  bool redraw_only_on_finalise_ = false;
+  const volatile std::sig_atomic_t* stop_requested_ = nullptr;
   uint32_t gui_update_interval_ms_ = 50;
   std::string snapshot_dir_;
   uint32_t snapshot_interval_ms_ = 1000;

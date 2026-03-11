@@ -1,6 +1,7 @@
 #include "monitor/sink_realtime.hpp"
 
 #include <filesystem>
+#include <thread>
 #include <utility>
 
 #include <zmq.h>
@@ -38,7 +39,7 @@ class RootDisplayRegistry final : public IRealtimeDisplayRegistry {
 
 RealtimeAnalysisSink::RealtimeAnalysisSink(std::vector<std::unique_ptr<IRealtimeAnalysis>> analyses,
                                            uint32_t gui_update_interval_ms)
-    : RealtimeAnalysisSink(std::move(analyses), {}, Options{gui_update_interval_ms, true, "", 1000}) {}
+    : RealtimeAnalysisSink(std::move(analyses), {}, Options{gui_update_interval_ms, true, false, nullptr, "", 1000, ""}) {}
 
 RealtimeAnalysisSink::RealtimeAnalysisSink(std::vector<std::unique_ptr<IRealtimeAnalysis>> analyses,
                                            std::vector<std::string> analysis_names,
@@ -46,6 +47,8 @@ RealtimeAnalysisSink::RealtimeAnalysisSink(std::vector<std::unique_ptr<IRealtime
     : analyses_(std::move(analyses)),
       analysis_names_(std::move(analysis_names)),
       enable_gui_(options.enable_gui),
+      redraw_only_on_finalise_(options.redraw_only_on_finalise),
+      stop_requested_(options.stop_requested),
       gui_update_interval_ms_(options.gui_update_interval_ms == 0 ? 1 : options.gui_update_interval_ms),
       snapshot_dir_(std::move(options.snapshot_dir)),
       snapshot_interval_ms_(options.snapshot_interval_ms == 0 ? 1 : options.snapshot_interval_ms),
@@ -144,13 +147,15 @@ bool RealtimeAnalysisSink::EnsureInitialised(std::string& error_text) {
   }
   current_analysis_name_.clear();
 
-  if (!RedrawAll(error_text)) {
-    return false;
+  if (!redraw_only_on_finalise_) {
+    if (!RedrawAll(error_text)) {
+      return false;
+    }
+    if (enable_gui_) {
+      gSystem->ProcessEvents();
+    }
+    SaveSnapshots();
   }
-  if (enable_gui_) {
-    gSystem->ProcessEvents();
-  }
-  SaveSnapshots();
   initialised_ = true;
   return true;
 #else
@@ -169,15 +174,17 @@ bool RealtimeAnalysisSink::BeginRun(uint32_t run_number, std::string& error_text
   has_active_run_ = true;
   active_run_number_ = run_number;
 #if defined(SIMPLEDAQ_HAS_ROOT) && SIMPLEDAQ_HAS_ROOT
-  // Force one immediate refresh at run start so UI snapshots reflect BeginOfRun state
-  // without waiting for the periodic snapshot timer.
-  if (!RedrawAll(error_text)) {
-    return false;
+  if (!redraw_only_on_finalise_) {
+    // Force one immediate refresh at run start so UI snapshots reflect BeginOfRun state
+    // without waiting for the periodic snapshot timer.
+    if (!RedrawAll(error_text)) {
+      return false;
+    }
+    if (enable_gui_) {
+      gSystem->ProcessEvents();
+    }
+    SaveSnapshots();
   }
-  if (enable_gui_) {
-    gSystem->ProcessEvents();
-  }
-  SaveSnapshots();
   const auto now = std::chrono::steady_clock::now();
   last_gui_update_ = now;
   last_snapshot_update_ = now;
@@ -231,6 +238,10 @@ bool RealtimeAnalysisSink::RedrawAll(std::string& error_text) {
 bool RealtimeAnalysisSink::PumpGui(std::string& error_text) {
   error_text.clear();
 #if defined(SIMPLEDAQ_HAS_ROOT) && SIMPLEDAQ_HAS_ROOT
+  if (redraw_only_on_finalise_) {
+    return true;
+  }
+
   const auto now = std::chrono::steady_clock::now();
   const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_gui_update_).count();
   const bool gui_due = elapsed_ms >= static_cast<long long>(gui_update_interval_ms_);
@@ -448,6 +459,27 @@ bool RealtimeAnalysisSink::Finalise(std::string& error_text) {
     gSystem->ProcessEvents();
   }
   SaveSnapshots();
+  if (enable_gui_ && redraw_only_on_finalise_) {
+    while (true) {
+      if (stop_requested_ != nullptr && *stop_requested_ != 0) {
+        break;
+      }
+
+      bool any_canvas_alive = false;
+      for (TCanvas* canvas : canvases_) {
+        if (canvas != nullptr && !canvas->IsBatch() && canvas->GetCanvasImp() != nullptr) {
+          any_canvas_alive = true;
+          break;
+        }
+      }
+      if (!any_canvas_alive) {
+        break;
+      }
+
+      gSystem->ProcessEvents();
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+  }
 #endif
   return true;
 }

@@ -640,6 +640,8 @@ int main(int argc, char** argv) {
     }
     RealtimeAnalysisSink::Options sink_options;
     sink_options.enable_gui = !options.no_gui;
+    sink_options.redraw_only_on_finalise = !options.input_files.empty();
+    sink_options.stop_requested = &g_stop_requested;
     sink_options.snapshot_dir = options.snapshot_dir;
     sink_options.snapshot_interval_ms = options.snapshot_interval_ms;
     sink_options.snapshot_select_endpoint = options.snapshot_select_endpoint;
