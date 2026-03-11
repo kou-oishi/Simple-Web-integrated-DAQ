@@ -17,7 +17,7 @@ class TGraph;
 
 class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEvent> {
  public:
-  explicit Kc705TofOverviewAnalysis(std::size_t trend_points);
+  Kc705TofOverviewAnalysis() = default;
 
   bool Initialise(std::string& error_text) override;
   bool BeginOfRun(uint32_t run_number, std::string& error_text) override;
@@ -28,7 +28,6 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
  private:
   bool Event(const Kc705TofEvent& Event, std::string& error_text) override;
 
-  std::size_t trend_points_ = 1000;
   Double_t daq_start_time_[2] = {-1, -1};
   Double_t min_time_ = 1e100, max_time_ = -1e100;
   
@@ -39,12 +38,16 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
   std::unique_ptr<TCanvas> canvas_tdcs_;
   std::unique_ptr<TCanvas> canvas_tofs_;
   std::unique_ptr<TCanvas> canvas_tofs_us_;
+  std::unique_ptr<TCanvas> canvas_tof_groups_;
+  std::unique_ptr<TCanvas> canvas_tof_groups_us_;
   std::unique_ptr<TH1D> hist_board_;
   std::unique_ptr<TH1D> hist_channel_;
   std::unique_ptr<TH1D> hist_channel_named_;
   std::vector<std::unique_ptr<TH1D>> hist_tdcs_;
   std::vector<std::unique_ptr<TH1D>> hist_tofs_;
   std::vector<std::unique_ptr<TH1D>> hist_tofs_us_;
+  std::vector<std::unique_ptr<TH1D>> hist_tof_groups_;
+  std::vector<std::unique_ptr<TH1D>> hist_tof_groups_us_;
   std::array<std::unique_ptr<TGraph>, Kc705TofPeriodicChannelCount()> periodic_rate_graphs_;
   std::array<std::deque<Double_t>, Kc705TofPeriodicChannelCount()> periodic_event_times_;
   std::array<Double_t, 2> last_periodic_time_ms_ = {0.0, 0.0};
