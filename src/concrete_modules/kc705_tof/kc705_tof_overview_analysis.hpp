@@ -38,11 +38,13 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
   std::unique_ptr<TCanvas> canvas_periodic_rate_trend_;
   std::unique_ptr<TCanvas> canvas_tdcs_;
   std::unique_ptr<TCanvas> canvas_tofs_;
+  std::unique_ptr<TCanvas> canvas_tofs_us_;
   std::unique_ptr<TH1D> hist_board_;
   std::unique_ptr<TH1D> hist_channel_;
   std::unique_ptr<TH1D> hist_channel_named_;
   std::vector<std::unique_ptr<TH1D>> hist_tdcs_;
   std::vector<std::unique_ptr<TH1D>> hist_tofs_;
+  std::vector<std::unique_ptr<TH1D>> hist_tofs_us_;
   std::array<std::unique_ptr<TGraph>, Kc705TofPeriodicChannelCount()> periodic_rate_graphs_;
   std::array<std::deque<Double_t>, Kc705TofPeriodicChannelCount()> periodic_event_times_;
   std::array<Double_t, 2> last_periodic_time_ms_ = {0.0, 0.0};

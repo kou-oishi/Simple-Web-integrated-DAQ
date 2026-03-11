@@ -16,8 +16,10 @@ namespace {
 constexpr Double_t kPeriodicRateWindowSec = 5.0;
 constexpr Double_t kPeriodicTrendRetentionMin = 10.0;
 constexpr Double_t kPeriodicPairGapMs = 20.0;
-constexpr Double_t kTofMinMs = -0.5;
+constexpr Double_t kTofMinMs = -2.0;
 constexpr Double_t kTofMaxMs = 40.0;
+constexpr Double_t kTofMinUs = -20.0;
+constexpr Double_t kTofMaxUs = 1000.0;
 
 void update_graph_axis_style(TGraph* graph, Double_t label_size, Double_t title_size) {
   if (graph == nullptr) {
@@ -113,11 +115,13 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
     }
   }
   canvas_tofs_ = std::make_unique<TCanvas>("kc705_tofs_canvas", "KC705 TOF: TOFs", 1500, 1000);
+  canvas_tofs_us_ = std::make_unique<TCanvas>("kc705_tofs_us_canvas", "KC705 TOF: TOFs (0-2 us)", 1500, 1000);
   const int num_named_channels = static_cast<int>(Kc705TofNamedChannelCount());
   const int num_tof_columns = to_canvas_grid(num_named_channels);
   const int num_tof_rows = static_cast<int>(std::ceil(static_cast<double>(num_named_channels) / num_tof_columns));
   canvas_tdcs_->Divide(num_tof_columns, num_tof_rows);
   canvas_tofs_->Divide(num_tof_columns, num_tof_rows);
+  canvas_tofs_us_->Divide(num_tof_columns, num_tof_rows);
   for (int i = 1; i <= num_named_channels; ++i) {
     auto* tdc_pad = canvas_tdcs_->cd(i);
     if (tdc_pad != nullptr) {
@@ -130,6 +134,12 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
       tof_pad->SetLeftMargin(0.15);
       tof_pad->SetBottomMargin(0.15);
       tof_pad->SetRightMargin(0.05);
+    }
+    auto* tof_us_pad = canvas_tofs_us_->cd(i);
+    if (tof_us_pad != nullptr) {
+      tof_us_pad->SetLeftMargin(0.15);
+      tof_us_pad->SetBottomMargin(0.15);
+      tof_us_pad->SetRightMargin(0.05);
     }
   }
   for (int i = num_named_channels + 1; i <= num_tof_columns * num_tof_rows; ++i) {
@@ -144,6 +154,12 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
       tof_pad->SetLeftMargin(0.15);
       tof_pad->SetBottomMargin(0.15);
       tof_pad->SetRightMargin(0.05);
+    }
+    auto* tof_us_pad = canvas_tofs_us_->cd(i);
+    if (tof_us_pad != nullptr) {
+      tof_us_pad->SetLeftMargin(0.15);
+      tof_us_pad->SetBottomMargin(0.15);
+      tof_us_pad->SetRightMargin(0.05);
     }
   }
 
@@ -186,6 +202,7 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
 
   hist_tdcs_.reserve(Kc705TofNamedChannelCount());
   hist_tofs_.reserve(Kc705TofNamedChannelCount());
+  hist_tofs_us_.reserve(Kc705TofNamedChannelCount());
   for (std::size_t i = 0; i < Kc705TofNamedChannelCount(); ++i) {
     const auto& channel_def = kKc705TofChannelDefs[i];
     // "TDC" keeps the original event time relative to the DAQ start.
@@ -215,6 +232,19 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
     hist_tof->SetFillColor(kBlue - 7);
     hist_tof->SetStats(kFALSE);
     hist_tofs_.push_back(std::move(hist_tof));
+
+    auto hist_tof_us = std::make_unique<TH1D>(
+        Form("kc705_tof_us_hist_ch%02u", static_cast<unsigned>(channel_def.channel_id)),
+        Form("TOF Channel %u (%s);TOF (us);Counts",
+             static_cast<unsigned>(channel_def.channel_id),
+             channel_def.name),
+        1000,
+        kTofMinUs,
+        kTofMaxUs);
+    hist_tof_us->SetDirectory(nullptr);
+    hist_tof_us->SetFillColor(kBlue - 7);
+    hist_tof_us->SetStats(kFALSE);
+    hist_tofs_us_.push_back(std::move(hist_tof_us));
   } 
   constexpr std::array<int, Kc705TofPeriodicChannelCount()> kPeriodicGraphColors = {kRed + 1, kBlue + 1};
   for (std::size_t i = 0; i < Kc705TofPeriodicChannelCount(); ++i) {
@@ -250,6 +280,9 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
   for (auto& hist_tof : hist_tofs_) {
     apply_axis_text_style(hist_tof.get(), 0.06, 0.07);
   }
+  for (auto& hist_tof_us : hist_tofs_us_) {
+    apply_axis_text_style(hist_tof_us.get(), 0.06, 0.07);
+  }
   for (auto& graph : periodic_rate_graphs_) {
     update_graph_axis_style(graph.get(), 0.05, 0.06);
   }
@@ -259,7 +292,8 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
       !RegisterCanvas(canvas_channel_named_.get(), error_text) ||
       !RegisterCanvas(canvas_periodic_rate_trend_.get(), error_text) ||
       !RegisterCanvas(canvas_tdcs_.get(), error_text) ||
-      !RegisterCanvas(canvas_tofs_.get(), error_text)) {
+      !RegisterCanvas(canvas_tofs_.get(), error_text) ||
+      !RegisterCanvas(canvas_tofs_us_.get(), error_text)) {
     return false;
   }
 
@@ -283,6 +317,10 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
     if (!RegisterDrawable(tof_pad, hist_tofs_[i].get(), "", error_text)) {
       return false;
     }
+    auto* tof_us_pad = canvas_tofs_us_->cd(static_cast<int>(i + 1));
+    if (!RegisterDrawable(tof_us_pad, hist_tofs_us_[i].get(), "", error_text)) {
+      return false;
+    }
   }
 
   return true;
@@ -300,6 +338,9 @@ bool Kc705TofOverviewAnalysis::BeginOfRun(uint32_t run_number, std::string& erro
   }
   for (auto& hist_tof : hist_tofs_) {
     hist_tof->Reset();
+  }
+  for (auto& hist_tof_us : hist_tofs_us_) {
+    hist_tof_us->Reset();
   }
   for (auto& graph : periodic_rate_graphs_) {
     graph->Set(0);
@@ -374,6 +415,9 @@ bool Kc705TofOverviewAnalysis::Event(const Kc705TofEvent& Event, std::string& er
     if (*sort_index < hist_tofs_.size() && has_first_periodic_time_ms_[board_index]) {
       const Double_t tof_ms = event_time_ms - first_periodic_time_ms_[board_index];
       hist_tofs_[*sort_index]->Fill(tof_ms);
+      if (*sort_index < hist_tofs_us_.size()) {
+        hist_tofs_us_[*sort_index]->Fill(tof_ms * 1.0e3);
+      }
     }
   } else {
     return true;

@@ -109,7 +109,7 @@ bool Kc705TofDecoder::FormatDecoded(const DecodedMessage& message,
   if (const auto periodic_index = PeriodicChannelIndex(Event.channel_id); periodic_index.has_value()) {
     const std::size_t pch_idx = *periodic_index;
     ++num_periodic_events_[pch_idx];
-    if (num_periodic_events_[pch_idx] % 1000 == 1) {
+    if (num_periodic_events_[pch_idx] % 10000 == 1) {
       char prescaled_buffer[96] = {};
       std::snprintf(prescaled_buffer,
                     sizeof(prescaled_buffer),
