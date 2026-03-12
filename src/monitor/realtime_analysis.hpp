@@ -69,10 +69,14 @@ class TypedRealtimeAnalysis : public IRealtimeAnalysis {
       error_text = "realtime analysis received unexpected decoded payload type";
       return false;
     }
-    return Event(*payload, error_text);
+    return Event(*payload, message, error_text);
   }
 
  protected:
+  virtual bool Event(const TPayload& payload, const DecodedMessage& message, std::string& error_text) {
+    static_cast<void>(message);
+    return Event(payload, error_text);
+  }
   virtual bool Event(const TPayload& payload, std::string& error_text) = 0;
 };
 
