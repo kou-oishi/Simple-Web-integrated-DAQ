@@ -15,6 +15,20 @@ class TCanvas;
 class TObject;
 class TVirtualPad;
 
+struct RealtimeRunTimeInfo {
+  struct Segment {
+    double start_unix_sec = 0.0;
+    double end_unix_sec = 0.0;
+  };
+
+  uint32_t run_number = 0;
+  double start_unix_sec = 0.0;
+  double end_unix_sec = 0.0;
+  double daq_time_sec = 0.0;
+  bool has_sql_time = false;
+  std::vector<Segment> segments;
+};
+
 class IRealtimeDisplayRegistry {
  public:
   virtual ~IRealtimeDisplayRegistry() = default;
@@ -49,6 +63,9 @@ class IRealtimeAnalysis {
   }
   virtual bool Finalise(std::string& error_text) = 0;
   virtual void SetAccumulateAcrossRuns(bool enabled) { static_cast<void>(enabled); }
+  virtual void SetRunTimeInfo(const std::vector<RealtimeRunTimeInfo>& run_time_info) {
+    static_cast<void>(run_time_info);
+  }
 
   void SetDisplayRegistry(IRealtimeDisplayRegistry* registry) { display_registry_ = registry; }
 

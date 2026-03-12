@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <map>
 #include <set>
 #include <sstream>
 #include <string>
@@ -352,6 +353,67 @@ bool sum_input_file_daq_time_sec(const std::vector<std::string>& input_files,
     ++out_found_subruns;
   }
 
+  return true;
+}
+
+bool collect_input_file_run_time_info(const std::vector<std::string>& input_files,
+                                      std::vector<RealtimeRunTimeInfo>& out_run_time_info,
+                                      std::string& out_error) {
+  out_run_time_info.clear();
+  out_error.clear();
+
+  std::set<std::pair<uint32_t, uint32_t>> unique_subruns;
+  for (const auto& path : input_files) {
+    uint32_t run_number = 0;
+    uint32_t subrun_number = 0;
+    if (!parse_run_subrun_from_path(path, run_number, subrun_number)) {
+      continue;
+    }
+    unique_subruns.emplace(run_number, subrun_number);
+  }
+
+  MySqlLogger mysql_logger;
+  if (!mysql_logger.IsEnabled()) {
+    return true;
+  }
+
+  std::map<uint32_t, RealtimeRunTimeInfo> run_info_by_run;
+  for (const auto& run_subrun : unique_subruns) {
+    double start_unix_sec = 0.0;
+    double duration_sec = 0.0;
+    bool found_start = false;
+    bool found_duration = false;
+    if (!mysql_logger.GetSubrunStartUnixTime(
+            run_subrun.first, run_subrun.second, start_unix_sec, found_start, out_error)) {
+      return false;
+    }
+    if (!mysql_logger.GetSubrunDurationSec(
+            run_subrun.first, run_subrun.second, duration_sec, found_duration, out_error)) {
+      return false;
+    }
+    if (!found_start || !found_duration) {
+      continue;
+    }
+
+    auto& info = run_info_by_run[run_subrun.first];
+    info.run_number = run_subrun.first;
+    info.daq_time_sec += duration_sec;
+    const double end_unix_sec = start_unix_sec + duration_sec;
+    info.segments.push_back({start_unix_sec, end_unix_sec});
+    if (!info.has_sql_time) {
+      info.start_unix_sec = start_unix_sec;
+      info.end_unix_sec = end_unix_sec;
+      info.has_sql_time = true;
+    } else {
+      info.start_unix_sec = std::min(info.start_unix_sec, start_unix_sec);
+      info.end_unix_sec = std::max(info.end_unix_sec, end_unix_sec);
+    }
+  }
+
+  for (const auto& [run_number, info] : run_info_by_run) {
+    static_cast<void>(run_number);
+    out_run_time_info.push_back(info);
+  }
   return true;
 }
 
@@ -785,6 +847,7 @@ int main(int argc, char** argv) {
 
   std::string error_text;
   std::string input_daq_time_report;
+  std::vector<RealtimeRunTimeInfo> input_run_time_info;
 
   auto create_decoder = [&](std::unique_ptr<IDecoder>& out_decoder, std::size_t& out_frame_size) -> bool {
     error_text.clear();
@@ -857,6 +920,7 @@ int main(int argc, char** argv) {
         std::cerr << "Analysis factory returned null analysis: " << analysis_name << "\n";
         return false;
       }
+      analysis->SetRunTimeInfo(input_run_time_info);
       analyses.push_back(std::move(analysis));
       analysis_names.push_back(analysis_name);
     }
@@ -892,6 +956,10 @@ int main(int argc, char** argv) {
     }
     input_daq_time_report =
         make_input_daq_time_report(total_daq_sec, found_subruns, missing_subruns, missing_run_subruns);
+    if (!collect_input_file_run_time_info(options.input_files, input_run_time_info, error_text)) {
+      std::cerr << "Failed to collect run DAQ time from SQL: " << error_text << "\n";
+      return 1;
+    }
   }
 
   if (per_input_root_mode) {
