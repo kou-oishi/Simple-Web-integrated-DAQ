@@ -48,6 +48,7 @@ class IRealtimeAnalysis {
     return true;
   }
   virtual bool Finalise(std::string& error_text) = 0;
+  virtual void SetAccumulateAcrossRuns(bool enabled) { static_cast<void>(enabled); }
 
   void SetDisplayRegistry(IRealtimeDisplayRegistry* registry) { display_registry_ = registry; }
 

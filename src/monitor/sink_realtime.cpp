@@ -1,6 +1,7 @@
 #include "monitor/sink_realtime.hpp"
 
 #include <filesystem>
+#include <iostream>
 #include <set>
 #include <thread>
 #include <utility>
@@ -41,7 +42,8 @@ class RootDisplayRegistry final : public IRealtimeDisplayRegistry {
 
 RealtimeAnalysisSink::RealtimeAnalysisSink(std::vector<std::unique_ptr<IRealtimeAnalysis>> analyses,
                                            uint32_t gui_update_interval_ms)
-    : RealtimeAnalysisSink(std::move(analyses), {}, Options{gui_update_interval_ms, true, false, nullptr, "", 1000, ""}) {}
+    : RealtimeAnalysisSink(
+          std::move(analyses), {}, Options{gui_update_interval_ms, true, false, false, "", nullptr, "", 1000, ""}) {}
 
 RealtimeAnalysisSink::RealtimeAnalysisSink(std::vector<std::unique_ptr<IRealtimeAnalysis>> analyses,
                                            std::vector<std::string> analysis_names,
@@ -50,6 +52,8 @@ RealtimeAnalysisSink::RealtimeAnalysisSink(std::vector<std::unique_ptr<IRealtime
       analysis_names_(std::move(analysis_names)),
       enable_gui_(options.enable_gui),
       redraw_only_on_finalise_(options.redraw_only_on_finalise),
+      accumulate_across_runs_(options.accumulate_across_runs),
+      pre_finalise_message_(std::move(options.pre_finalise_message)),
       stop_requested_(options.stop_requested),
       gui_update_interval_ms_(options.gui_update_interval_ms == 0 ? 1 : options.gui_update_interval_ms),
       snapshot_dir_(std::move(options.snapshot_dir)),
@@ -147,6 +151,7 @@ bool RealtimeAnalysisSink::EnsureInitialised(std::string& error_text) {
     auto& analysis = analyses_[i];
     current_analysis_name_ = analysis_names_[i];
     analysis->SetDisplayRegistry(&registry);
+    analysis->SetAccumulateAcrossRuns(accumulate_across_runs_);
     if (!analysis->Initialise(error_text)) {
       return false;
     }
@@ -447,6 +452,7 @@ bool RealtimeAnalysisSink::Consume(const DecodedMessage& message, std::string& e
       return false;
     }
   }
+  ++consumed_events_;
   return PumpGui(error_text);
 }
 
@@ -489,6 +495,11 @@ bool RealtimeAnalysisSink::Finalise(std::string& error_text) {
   }
   SaveSnapshots();
   if (enable_gui_ && redraw_only_on_finalise_) {
+    std::cout << "processed events: total=" << consumed_events_ << "\n";
+    if (!pre_finalise_message_.empty()) {
+      std::cout << pre_finalise_message_;
+    }
+    std::cout.flush();
     TApplication* root_app = app_ != nullptr ? app_ : gApplication;
     if (root_app != nullptr) {
       root_app->SetReturnFromRun(kTRUE);

@@ -21,6 +21,8 @@ class RealtimeAnalysisSink : public IEventSink {
     uint32_t gui_update_interval_ms = 50;
     bool enable_gui = true;
     bool redraw_only_on_finalise = false;
+    bool accumulate_across_runs = false;
+    std::string pre_finalise_message;
     const volatile std::sig_atomic_t* stop_requested = nullptr;
     std::string snapshot_dir;
     uint32_t snapshot_interval_ms = 1000;
@@ -67,6 +69,9 @@ class RealtimeAnalysisSink : public IEventSink {
   uint32_t active_run_number_ = 0;
   bool enable_gui_ = true;
   bool redraw_only_on_finalise_ = false;
+  bool accumulate_across_runs_ = false;
+  std::string pre_finalise_message_;
+  uint64_t consumed_events_ = 0;
   const volatile std::sig_atomic_t* stop_requested_ = nullptr;
   uint32_t gui_update_interval_ms_ = 50;
   std::string snapshot_dir_;

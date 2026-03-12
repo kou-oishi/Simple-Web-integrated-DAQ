@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -13,6 +14,7 @@
 #include "concrete_modules/module_registry.hpp"
 #include "control_api/zmq_status_subscriber.hpp"
 #include "core/defaults.hpp"
+#include "core/mysql_logger.hpp"
 #include "monitor/decoder.hpp"
 #include "monitor/frame_source.hpp"
 #include "monitor/pipeline.hpp"
@@ -35,11 +37,9 @@ struct Options {
   std::string raw_dir;
   std::string dec_dir;
   bool run_selected = false;
-  uint32_t run_start_number = 0;
-  uint32_t run_end_number = 0;
+  std::vector<std::pair<uint32_t, uint32_t>> run_ranges;
   bool subrun_selected = false;
-  uint32_t subrun_start_number = 0;
-  uint32_t subrun_end_number = 0;
+  std::vector<std::pair<uint32_t, uint32_t>> subrun_ranges;
   std::string decoder = "kc705_tof";
   uint64_t max_events = 0;
   uint64_t print_every = 1000;
@@ -164,7 +164,7 @@ void print_modules_json() {
 void print_usage(const char* prog) {
   std::cerr << "Usage:\n";
   std::cerr << "  " << prog << " [input_file.dat ...] [options]\n";
-  std::cerr << "  " << prog << " --run <n|n-m> [--subrun <n|n-m>] [--raw-dir <dir>] [options]\n";
+  std::cerr << "  " << prog << " --run <list> [--subrun <list>] [--raw-dir <dir>] [options]\n";
   std::cerr << "  " << prog << " --data-endpoint <ep> [options]\n";
   std::cerr << "\n";
   std::cerr << "Input source selection (mutually exclusive):\n";
@@ -174,8 +174,8 @@ void print_usage(const char* prog) {
   std::cerr << "  If none is specified, --data-endpoint defaults to " << daq_defaults::kDataEndpoint << "\n";
   std::cerr << "\n";
   std::cerr << "Options:\n";
-  std::cerr << "      --run <n|n-m>             Select run number or inclusive run range from raw dir\n";
-  std::cerr << "      --subrun <n|n-m>          With --run, select subrun number/range\n";
+  std::cerr << "      --run <list>              Select run number(s)/range(s), e.g. 132-135,137\n";
+  std::cerr << "      --subrun <list>           With --run, select subrun number(s)/range(s)\n";
   std::cerr << "                                If omitted, scans subrun 0,1,2,... until a missing file\n";
   std::cerr << "      --raw-dir <dir>           Raw input directory for --run mode (default: $RAWDIR)\n";
   std::cerr << "      --dec-dir <dir>           Output directory for per-input ROOT output (default: $DECDIR)\n";
@@ -183,8 +183,8 @@ void print_usage(const char* prog) {
   std::cerr << "  -d, --decoder <Name[=spec]>   Decoder module and optional decoder spec (e.g. kc705_tof)\n";
   std::cerr << "  -m, --max-events <n>          Maximum events to decode (0 means all)\n";
   std::cerr << "  -p, --print-every <n>         Text stream interval for -t (default: 1000)\n";
-  std::cerr << "  -r, --run <n|n-m>             Select run number/range from raw dir mode\n";
-  std::cerr << "  -s, --subrun <n|n-m>          Select subrun number/range (requires --run)\n";
+  std::cerr << "  -r, --run <list>              Select run number(s)/range(s) from raw dir mode\n";
+  std::cerr << "  -s, --subrun <list>           Select subrun number(s)/range(s) (requires --run)\n";
   std::cerr << "  -q, --poll-ms <n>             Poll interval in milliseconds (default: 200)\n";
   std::cerr << "  -i, --idle-timeout-sec <n>    Stop after n seconds with no data (0 means never)\n";
   std::cerr << "  -t, --text-stream             Enable per-Event text output\n";
@@ -256,6 +256,30 @@ bool parse_u32_range(const std::string& text, uint32_t& out_begin, uint32_t& out
   return true;
 }
 
+bool parse_u32_range_list(const std::string& text, std::vector<std::pair<uint32_t, uint32_t>>& out_ranges) {
+  out_ranges.clear();
+  std::size_t begin = 0;
+  while (begin < text.size()) {
+    const std::size_t comma = text.find(',', begin);
+    const std::string token =
+        text.substr(begin, comma == std::string::npos ? std::string::npos : (comma - begin));
+    if (token.empty()) {
+      return false;
+    }
+    uint32_t range_begin = 0;
+    uint32_t range_end = 0;
+    if (!parse_u32_range(token, range_begin, range_end)) {
+      return false;
+    }
+    out_ranges.emplace_back(range_begin, range_end);
+    if (comma == std::string::npos) {
+      break;
+    }
+    begin = comma + 1;
+  }
+  return !out_ranges.empty();
+}
+
 std::string make_run_subrun_path(const std::string& dir, uint32_t run_number, uint32_t subrun_number) {
   std::ostringstream oss;
   oss << "run" << std::setw(daq_defaults::kRunNumberWidth) << std::setfill('0') << run_number
@@ -267,6 +291,83 @@ std::string make_per_input_root_path(const std::string& dec_dir, const std::stri
   const std::filesystem::path in_path(input_file_path);
   const std::string stem = in_path.stem().string();
   return (std::filesystem::path(dec_dir) / (stem + ".root")).string();
+}
+
+bool parse_run_subrun_from_path(const std::string& path, uint32_t& out_run, uint32_t& out_subrun) {
+  const std::string filename = std::filesystem::path(path).filename().string();
+  if (filename.size() < 7 || filename.substr(filename.size() - 4) != ".dat") {
+    return false;
+  }
+
+  const std::size_t run_pos = filename.find("run");
+  const std::size_t sub_pos = filename.find("_sub");
+  if (run_pos == std::string::npos || sub_pos == std::string::npos || sub_pos <= run_pos + 3) {
+    return false;
+  }
+
+  const std::string run_text = filename.substr(run_pos + 3, sub_pos - (run_pos + 3));
+  const std::string sub_text = filename.substr(sub_pos + 4, filename.size() - (sub_pos + 4) - 4);
+  return parse_uint32(run_text, out_run) && parse_uint32(sub_text, out_subrun);
+}
+
+bool sum_input_file_daq_time_sec(const std::vector<std::string>& input_files,
+                                 double& out_total_sec,
+                                 std::size_t& out_found_subruns,
+                                 std::size_t& out_missing_subruns,
+                                 std::vector<std::pair<uint32_t, uint32_t>>& out_missing_run_subruns,
+                                 std::string& out_error) {
+  out_total_sec = 0.0;
+  out_found_subruns = 0;
+  out_missing_subruns = 0;
+  out_missing_run_subruns.clear();
+  out_error.clear();
+
+  std::set<std::pair<uint32_t, uint32_t>> unique_subruns;
+  for (const auto& path : input_files) {
+    uint32_t run_number = 0;
+    uint32_t subrun_number = 0;
+    if (!parse_run_subrun_from_path(path, run_number, subrun_number)) {
+      continue;
+    }
+    unique_subruns.emplace(run_number, subrun_number);
+  }
+
+  MySqlLogger mysql_logger;
+  if (!mysql_logger.IsEnabled()) {
+    return true;
+  }
+
+  for (const auto& run_subrun : unique_subruns) {
+    double duration_sec = 0.0;
+    bool found = false;
+    if (!mysql_logger.GetSubrunDurationSec(run_subrun.first, run_subrun.second, duration_sec, found, out_error)) {
+      return false;
+    }
+    if (!found) {
+      ++out_missing_subruns;
+      out_missing_run_subruns.push_back(run_subrun);
+      continue;
+    }
+    out_total_sec += duration_sec;
+    ++out_found_subruns;
+  }
+
+  return true;
+}
+
+std::string make_input_daq_time_report(double total_daq_sec,
+                                       std::size_t found_subruns,
+                                       std::size_t missing_subruns,
+                                       const std::vector<std::pair<uint32_t, uint32_t>>& missing_run_subruns) {
+  std::ostringstream oss;
+  oss << "DAQ time from SQL: total=" << total_daq_sec << " sec"
+      << " found_subruns=" << found_subruns
+      << " missing_subruns=" << missing_subruns << "\n";
+  for (const auto& run_subrun : missing_run_subruns) {
+    oss << "Warning: DAQ time not found in SQL for run=" << run_subrun.first
+        << " subrun=" << run_subrun.second << "\n";
+  }
+  return oss.str();
 }
 
 bool parse_status_u32_field(const std::string& payload, const std::string& key, uint32_t& out) {
@@ -325,41 +426,46 @@ void append_existing_subrun_files(const std::string& raw_dir,
 }
 
 bool append_run_selected_files(const std::string& raw_dir,
-                               uint32_t run_begin,
-                               uint32_t run_end,
+                               const std::vector<std::pair<uint32_t, uint32_t>>& run_ranges,
                                bool subrun_selected,
-                               uint32_t subrun_begin,
-                               uint32_t subrun_end,
+                               const std::vector<std::pair<uint32_t, uint32_t>>& subrun_ranges,
                                std::vector<std::string>& out_files,
                                std::string& out_error) {
   out_error.clear();
   out_files.clear();
-  for (uint32_t run = run_begin; run <= run_end; ++run) {
-    std::size_t before_count = out_files.size();
-    if (subrun_selected) {
-      for (uint32_t sub = subrun_begin; sub <= subrun_end; ++sub) {
-        const std::string path = make_run_subrun_path(raw_dir, run, sub);
-        if (!std::filesystem::exists(path)) {
-          out_error = "input file not found for selected run/subrun: " + path;
-          return false;
+  for (const auto& run_range : run_ranges) {
+    for (uint32_t run = run_range.first; run <= run_range.second; ++run) {
+      std::size_t before_count = out_files.size();
+      if (subrun_selected) {
+        for (const auto& subrun_range : subrun_ranges) {
+          for (uint32_t sub = subrun_range.first; sub <= subrun_range.second; ++sub) {
+            const std::string path = make_run_subrun_path(raw_dir, run, sub);
+            if (!std::filesystem::exists(path)) {
+              out_error = "input file not found for selected run/subrun: " + path;
+              return false;
+            }
+            out_files.push_back(path);
+            if (sub == 0xFFFFFFFFU) {
+              break;
+            }
+          }
         }
-        out_files.push_back(path);
-      }
-    } else {
-      for (uint32_t sub = 0;; ++sub) {
-        const std::string path = make_run_subrun_path(raw_dir, run, sub);
-        if (!std::filesystem::exists(path)) {
-          break;
+      } else {
+        for (uint32_t sub = 0;; ++sub) {
+          const std::string path = make_run_subrun_path(raw_dir, run, sub);
+          if (!std::filesystem::exists(path)) {
+            break;
+          }
+          out_files.push_back(path);
         }
-        out_files.push_back(path);
       }
-    }
-    if (out_files.size() == before_count) {
-      out_error = "no subrun files found for run " + std::to_string(run) + " in " + raw_dir;
-      return false;
-    }
-    if (run == 0xFFFFFFFFU) {
-      break;
+      if (out_files.size() == before_count) {
+        out_error = "no subrun files found for run " + std::to_string(run) + " in " + raw_dir;
+        return false;
+      }
+      if (run == 0xFFFFFFFFU) {
+        break;
+      }
     }
   }
   if (out_files.empty()) {
@@ -434,15 +540,15 @@ bool parse_args(int argc, char** argv, Options& options) {
         options.replay_current_run = true;
         break;
       case 'r':
-        if (!parse_u32_range(optarg, options.run_start_number, options.run_end_number)) {
-          std::cerr << "Invalid --run (expected n or n-m)\n";
+        if (!parse_u32_range_list(optarg, options.run_ranges)) {
+          std::cerr << "Invalid --run (expected n, n-m, or comma-separated list)\n";
           return false;
         }
         options.run_selected = true;
         break;
       case 's':
-        if (!parse_u32_range(optarg, options.subrun_start_number, options.subrun_end_number)) {
-          std::cerr << "Invalid --subrun (expected n or n-m)\n";
+        if (!parse_u32_range_list(optarg, options.subrun_ranges)) {
+          std::cerr << "Invalid --subrun (expected n, n-m, or comma-separated list)\n";
           return false;
         }
         options.subrun_selected = true;
@@ -544,8 +650,8 @@ bool parse_args(int argc, char** argv, Options& options) {
 
     std::vector<std::string> selected_files;
     std::string select_error;
-    if (!append_run_selected_files(options.raw_dir, options.run_start_number, options.run_end_number,
-                                   options.subrun_selected, options.subrun_start_number, options.subrun_end_number,
+    if (!append_run_selected_files(options.raw_dir, options.run_ranges,
+                                   options.subrun_selected, options.subrun_ranges,
                                    selected_files, select_error)) {
       std::cerr << select_error << "\n";
       return false;
@@ -678,6 +784,7 @@ int main(int argc, char** argv) {
   }
 
   std::string error_text;
+  std::string input_daq_time_report;
 
   auto create_decoder = [&](std::unique_ptr<IDecoder>& out_decoder, std::size_t& out_frame_size) -> bool {
     error_text.clear();
@@ -756,6 +863,8 @@ int main(int argc, char** argv) {
     RealtimeAnalysisSink::Options sink_options;
     sink_options.enable_gui = !options.no_gui;
     sink_options.redraw_only_on_finalise = !options.input_files.empty();
+    sink_options.accumulate_across_runs = !options.input_files.empty();
+    sink_options.pre_finalise_message = input_daq_time_report;
     sink_options.stop_requested = &g_stop_requested;
     sink_options.snapshot_dir = options.snapshot_dir;
     sink_options.snapshot_interval_ms = options.snapshot_interval_ms;
@@ -771,6 +880,19 @@ int main(int argc, char** argv) {
 
   const bool per_input_root_mode = options.root_out_requested && options.root_out.empty();
   uint64_t total_processed_events = 0;
+  if (!options.no_console && !options.input_files.empty()) {
+    double total_daq_sec = 0.0;
+    std::size_t found_subruns = 0;
+    std::size_t missing_subruns = 0;
+    std::vector<std::pair<uint32_t, uint32_t>> missing_run_subruns;
+    if (!sum_input_file_daq_time_sec(
+            options.input_files, total_daq_sec, found_subruns, missing_subruns, missing_run_subruns, error_text)) {
+      std::cerr << "Failed to sum DAQ time from SQL: " << error_text << "\n";
+      return 1;
+    }
+    input_daq_time_report =
+        make_input_daq_time_report(total_daq_sec, found_subruns, missing_subruns, missing_run_subruns);
+  }
 
   if (per_input_root_mode) {
 #if defined(SIMPLEDAQ_HAS_ROOT) && SIMPLEDAQ_HAS_ROOT
@@ -814,7 +936,7 @@ int main(int argc, char** argv) {
         return 1;
       }
       total_processed_events += processed_events;
-      if (!options.no_console) {
+      if (!options.no_console && options.analyses.empty()) {
         std::cout << "processed events: file=" << processed_events << " total=" << total_processed_events << "\n";
       }
     }
@@ -903,8 +1025,12 @@ int main(int argc, char** argv) {
       return 1;
     }
     total_processed_events += processed_events;
-    if (!options.no_console && !options.input_files.empty()) {
+    if (!options.no_console && !options.input_files.empty() && options.analyses.empty()) {
       std::cout << "processed events: total=" << total_processed_events << "\n";
+    }
+    if (!options.no_console && !options.input_files.empty() && options.analyses.empty() &&
+        !input_daq_time_report.empty()) {
+      std::cout << input_daq_time_report;
     }
   }
 
