@@ -29,6 +29,7 @@ class Kc705TofDecoder final : public IDecoder {
  private:
   static bool frame_to_event(const std::vector<uint8_t>& frame, Kc705TofEvent& out_event, std::string& error_text);
   bool PrepareSubrunContext(uint32_t run_number, uint32_t subrun_number, std::string& error_text) const;
+  bool PopulateTimestamp(Kc705TofEvent& event, std::string& error_text) const;
   double ComputeUnixTimestamp(const Kc705TofEvent& event) const;
 
   std::array<size_t, Kc705TofPeriodicChannelCount()> num_periodic_events_{};

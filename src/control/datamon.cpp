@@ -194,6 +194,7 @@ void print_usage(const char* prog) {
   std::cerr << "                                With value: write all decoded events to one ROOT file\n";
   std::cerr << "                                Without value: write per-input same-name .root under --dec-dir/$DECDIR\n";
   std::cerr << "  -a, --analysis <Name[=spec]>  Enable realtime analysis module (repeatable)\n";
+  std::cerr << "                                kc705_tof_overview: set exclude_reconfig=0 to disable reconfiguration exclusion\n";
   std::cerr << "      --no-gui                  Disable ROOT GUI event loop (batch mode)\n";
   std::cerr << "      --snapshot-dir <dir>      Save analysis canvas snapshots as PNG files\n";
   std::cerr << "      --snapshot-interval-ms <n> Snapshot interval in milliseconds (default: 1000)\n";

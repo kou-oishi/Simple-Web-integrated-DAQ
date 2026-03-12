@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 #include "monitor/decoded_event.hpp"
@@ -17,23 +18,25 @@ struct Kc705TofEvent : public DecodedEventBase {
   uint8_t board_id = 0;
   uint8_t channel_id = 0;
   Double_t time = 0.0;
+  Double_t timestamp = std::numeric_limits<Double_t>::quiet_NaN();
 };
 
 struct Kc705TofChannelDef {
   uint8_t channel_id = 0;
   const char* name = "";
+  const char* summary_name = "";
 };
 
 inline constexpr std::array<Kc705TofChannelDef, 9> kKc705TofChannelDefs = {{
-    {3,  "RECBE 1"},
-    {2,  "RECBE 2"},
-    {9,  "RECBE 3"},
-    {8,  "MKii v1 1"},
-    {6,  "MKii v1 2"},
-    {12, "MKii v2"},
-    {4,  "ROESTI 1"},
-    {5,  "ROESTI 2"},
-    {10, "ROESTI 3"},
+    {3,  "RECBE 1",   "recbe18"},
+    {2,  "RECBE 2",   "recbe19"},
+    {9,  "RECBE 3",   "recbe20"},
+    {8,  "MKii v1 1", "mkii1"},
+    {6,  "MKii v1 2", "mkii2"},
+    {12, "MKii v2",   "mkii3"},
+    {4,  "ROESTI 1",  "roesti21"},
+    {5,  "ROESTI 2",  "roesti22"},
+    {10, "ROESTI 3",  "roesti23"},
 }};
 
 inline constexpr std::size_t Kc705TofNamedChannelCount() {

@@ -54,6 +54,19 @@ bool Kc705TofDecoder::PrepareSubrunContext(uint32_t run_number,
   return true;
 }
 
+bool Kc705TofDecoder::PopulateTimestamp(Kc705TofEvent& event, std::string& error_text) const {
+  error_text.clear();
+  if (!PrepareSubrunContext(event.run_number, event.subrun_number, error_text)) {
+    return false;
+  }
+  if (IsPeriodicChannel(event.channel_id) && event.board_id < first_periodic_time_by_board_.size() &&
+      !first_periodic_time_by_board_[event.board_id].has_value()) {
+    first_periodic_time_by_board_[event.board_id] = static_cast<double>(event.time);
+  }
+  event.timestamp = ComputeUnixTimestamp(event);
+  return true;
+}
+
 double Kc705TofDecoder::ComputeUnixTimestamp(const Kc705TofEvent& event) const {
   if (!subrun_start_unix_time_.has_value() || event.board_id >= first_periodic_time_by_board_.size()) {
     return std::numeric_limits<double>::quiet_NaN();
@@ -96,6 +109,9 @@ bool Kc705TofDecoder::DecodeFrame(const std::vector<uint8_t>& frame,
   Event.run_number = out_message.run_number;
   Event.subrun_number = out_message.subrun_number;
   Event.event_number = out_message.event_number;
+  if (!PopulateTimestamp(Event, error_text)) {
+    return false;
+  }
 
   out_message.payload = Event;
   return true;
@@ -121,11 +137,9 @@ bool Kc705TofDecoder::DecodedToTreeValues(const DecodedMessage& message,
   if (!PrepareSubrunContext(message.run_number, message.subrun_number, error_text)) {
     return false;
   }
-  if (IsPeriodicChannel(Event.channel_id) && Event.board_id < first_periodic_time_by_board_.size() &&
-      !first_periodic_time_by_board_[Event.board_id].has_value()) {
-    first_periodic_time_by_board_[Event.board_id] = static_cast<double>(Event.time);
+  if (!PopulateTimestamp(Event, error_text)) {
+    return false;
   }
-  const double timestamp = ComputeUnixTimestamp(Event);
 
   out_values.clear();
   out_values.reserve(5);
@@ -133,7 +147,7 @@ bool Kc705TofDecoder::DecodedToTreeValues(const DecodedMessage& message,
   out_values.push_back(TreeValue::FromU64(static_cast<uint64_t>(Event.board_id)));
   out_values.push_back(TreeValue::FromU64(static_cast<uint64_t>(Event.channel_id)));
   out_values.push_back(TreeValue::FromF64(static_cast<double>(Event.time)));
-  out_values.push_back(TreeValue::FromF64(timestamp));
+  out_values.push_back(TreeValue::FromF64(static_cast<double>(Event.timestamp)));
   return true;
 }
 

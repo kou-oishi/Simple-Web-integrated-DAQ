@@ -3,11 +3,18 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iostream>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include <TCanvas.h>
 #include <TGraph.h>
 #include <TH1D.h>
+#include <TLatex.h>
 
 #include "concrete_modules/module_registry.hpp"
 
@@ -16,12 +23,37 @@ namespace {
 constexpr Double_t kPeriodicRateWindowSec = 5.0;
 constexpr Double_t kPeriodicTrendRetentionMin = 10.0;
 constexpr Double_t kPeriodicPairGapMs = 20.0;
+constexpr Double_t kReconfigExclusionMarginSec = 3.0;
 constexpr Double_t kTofMinMs = -2.0;
 constexpr Double_t kTofMaxMs = 40.0;
 constexpr Double_t kTofMinUs = 1.0;
 constexpr Double_t kTofMaxUs = 4.0;
 constexpr std::size_t kTofGroupSize = 3;
 constexpr std::size_t kPeriodicTrendPoints = 1000;
+
+std::optional<std::filesystem::path> find_exclusion_summary_dir() {
+  const char* env_value = std::getenv("DCSLOGDIR");
+  if (env_value == nullptr || env_value[0] == '\0') {
+    return std::nullopt;
+  }
+
+  const std::filesystem::path candidate(env_value);
+  std::error_code ec;
+  if (std::filesystem::is_directory(candidate, ec)) {
+    return candidate;
+  }
+  return std::nullopt;
+}
+
+std::vector<std::string> split_tsv_line(const std::string& line) {
+  std::vector<std::string> columns;
+  std::stringstream ss(line);
+  std::string field;
+  while (std::getline(ss, field, '\t')) {
+    columns.push_back(field);
+  }
+  return columns;
+}
 
 struct TofGroupDef {
   const char* name;
@@ -80,17 +112,50 @@ int to_canvas_grid(int n_pads) {
 }
 
 bool parse_overview_spec(const ParsedAnalysisSpec& spec, std::string& error_text) {
-  if (!spec.RejectUnknown({}, error_text)) {
+  if (!spec.RejectUnknown({"exclude_reconfig"}, error_text)) {
     return false;
   }
 
   return true;
 }
 
+bool value_is_in_histogram_range(const TH1D* hist, Double_t value) {
+  if (hist == nullptr) {
+    return false;
+  }
+  const auto* axis = hist->GetXaxis();
+  return axis != nullptr && value >= axis->GetXmin() && value < axis->GetXmax();
+}
+
+void fill_histogram_if_in_range(TH1D* hist, Double_t value) {
+  if (value_is_in_histogram_range(hist, value)) {
+    hist->Fill(value);
+  }
+}
+
+std::unique_ptr<TLatex> make_entry_label(const char* name) {
+  auto label = std::make_unique<TLatex>();
+  label->SetName(name);
+  label->SetNDC(kTRUE);
+  label->SetTextAlign(13);
+  label->SetTextSize(0.055);
+  return label;
+}
+
+void update_entry_label(TLatex* label, const TH1D* hist) {
+  if (label == nullptr || hist == nullptr) {
+    return;
+  }
+  label->SetText(0.18, 0.86, Form("Entries: %.0f", hist->GetEntries()));
+}
+
 }  // namespace
 
 bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
   error_text.clear();
+  if (enable_exclusion_filter_ && !LoadExcludedTimeRanges(error_text)) {
+    return false;
+  }
   // Keep the summary plots separate from the per-channel timing plots.
   canvas_board_ = std::make_unique<TCanvas>("kc705_board_canvas", "KC705 TOF: Board ID");
   canvas_channel_ = std::make_unique<TCanvas>("kc705_channel_canvas", "KC705 TOF: Channel ID");
@@ -141,12 +206,14 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
       tdc_pad->SetLeftMargin(0.15);
       tdc_pad->SetBottomMargin(0.15);
       tdc_pad->SetRightMargin(0.05);
+      tdc_pad->SetLogy();
     }
     auto* tof_pad = canvas_tofs_->cd(i);
     if (tof_pad != nullptr) {
       tof_pad->SetLeftMargin(0.15);
       tof_pad->SetBottomMargin(0.15);
       tof_pad->SetRightMargin(0.05);
+      tof_pad->SetLogy();
     }
     auto* tof_us_pad = canvas_tofs_us_->cd(i);
     if (tof_us_pad != nullptr) {
@@ -161,6 +228,7 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
       tof_group_pad->SetLeftMargin(0.15);
       tof_group_pad->SetBottomMargin(0.15);
       tof_group_pad->SetRightMargin(0.05);
+      tof_group_pad->SetLogy();
     }
     auto* tof_group_us_pad = canvas_tof_groups_us_->cd(i);
     if (tof_group_us_pad != nullptr) {
@@ -230,6 +298,8 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
   hist_tdcs_.reserve(Kc705TofNamedChannelCount());
   hist_tofs_.reserve(Kc705TofNamedChannelCount());
   hist_tofs_us_.reserve(Kc705TofNamedChannelCount());
+  tof_entry_labels_.reserve(Kc705TofNamedChannelCount());
+  tof_us_entry_labels_.reserve(Kc705TofNamedChannelCount());
   for (std::size_t i = 0; i < Kc705TofNamedChannelCount(); ++i) {
     const auto& channel_def = kKc705TofChannelDefs[i];
     // "TDC" keeps the original event time relative to the DAQ start.
@@ -272,9 +342,15 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
     hist_tof_us->SetFillColor(kBlue - 7);
     hist_tof_us->SetStats(kFALSE);
     hist_tofs_us_.push_back(std::move(hist_tof_us));
+
+    tof_entry_labels_.push_back(make_entry_label(Form("kc705_tof_entries_ch%02u", static_cast<unsigned>(channel_def.channel_id))));
+    tof_us_entry_labels_.push_back(
+        make_entry_label(Form("kc705_tof_us_entries_ch%02u", static_cast<unsigned>(channel_def.channel_id))));
   }
   hist_tof_groups_.reserve(kTofGroupDefs.size());
   hist_tof_groups_us_.reserve(kTofGroupDefs.size());
+  tof_group_entry_labels_.reserve(kTofGroupDefs.size());
+  tof_group_us_entry_labels_.reserve(kTofGroupDefs.size());
   for (const auto& group_def : kTofGroupDefs) {
     auto hist_tof_group = std::make_unique<TH1D>(
         Form("kc705_tof_group_hist_%s", group_def.name),
@@ -297,6 +373,9 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
     hist_tof_group_us->SetFillColor(kBlue - 7);
     hist_tof_group_us->SetStats(kFALSE);
     hist_tof_groups_us_.push_back(std::move(hist_tof_group_us));
+
+    tof_group_entry_labels_.push_back(make_entry_label(Form("kc705_tof_group_entries_%s", group_def.name)));
+    tof_group_us_entry_labels_.push_back(make_entry_label(Form("kc705_tof_group_us_entries_%s", group_def.name)));
   }
   constexpr std::array<int, Kc705TofPeriodicChannelCount()> kPeriodicGraphColors = {kRed + 1, kBlue + 1};
   for (std::size_t i = 0; i < Kc705TofPeriodicChannelCount(); ++i) {
@@ -377,8 +456,14 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
     if (!RegisterDrawable(tof_pad, hist_tofs_[i].get(), "", error_text)) {
       return false;
     }
+    if (!RegisterDrawable(tof_pad, tof_entry_labels_[i].get(), "SAME", error_text)) {
+      return false;
+    }
     auto* tof_us_pad = canvas_tofs_us_->cd(static_cast<int>(i + 1));
     if (!RegisterDrawable(tof_us_pad, hist_tofs_us_[i].get(), "", error_text)) {
+      return false;
+    }
+    if (!RegisterDrawable(tof_us_pad, tof_us_entry_labels_[i].get(), "SAME", error_text)) {
       return false;
     }
   }
@@ -387,8 +472,14 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
     if (!RegisterDrawable(tof_group_pad, hist_tof_groups_[i].get(), "", error_text)) {
       return false;
     }
+    if (!RegisterDrawable(tof_group_pad, tof_group_entry_labels_[i].get(), "SAME", error_text)) {
+      return false;
+    }
     auto* tof_group_us_pad = canvas_tof_groups_us_->cd(static_cast<int>(i + 1));
     if (!RegisterDrawable(tof_group_us_pad, hist_tof_groups_us_[i].get(), "", error_text)) {
+      return false;
+    }
+    if (!RegisterDrawable(tof_group_us_pad, tof_group_us_entry_labels_[i].get(), "SAME", error_text)) {
       return false;
     }
   }
@@ -420,6 +511,8 @@ bool Kc705TofOverviewAnalysis::BeginOfRun(uint32_t run_number, std::string& erro
   }
   min_time_ = 1e100;
   max_time_ = -1e100;
+  excluded_event_count_ = 0;
+  excluded_event_count_by_channel_.fill(0);
   daq_start_time_[0] = daq_start_time_[1] = -1;
   last_periodic_time_ms_ = {0.0, 0.0};
   first_periodic_time_ms_ = {0.0, 0.0};
@@ -436,13 +529,120 @@ bool Kc705TofOverviewAnalysis::BeginOfRun(uint32_t run_number, std::string& erro
 }
 
 bool Kc705TofOverviewAnalysis::EndOfRun(uint32_t run_number, std::string& error_text) {
-  static_cast<void>(run_number);
   error_text.clear();
+  if (enable_exclusion_filter_) {
+    std::cout << "[kc705_tof_overview] run " << run_number
+              << " excluded " << excluded_event_count_ << " events";
+    bool printed_channel_detail = false;
+    for (std::size_t i = 0; i < excluded_event_count_by_channel_.size(); ++i) {
+      if (excluded_event_count_by_channel_[i] == 0) {
+        continue;
+      }
+      std::cout << (printed_channel_detail ? "," : " (");
+      std::cout << kKc705TofChannelDefs[i].summary_name << "=" << excluded_event_count_by_channel_[i];
+      printed_channel_detail = true;
+    }
+    if (printed_channel_detail) {
+      std::cout << ")";
+    }
+    std::cout << '\n';
+  }
   return true;
+}
+
+bool Kc705TofOverviewAnalysis::LoadExcludedTimeRanges(std::string& error_text) {
+  error_text.clear();
+  for (auto& ranges : excluded_time_ranges_) {
+    ranges.clear();
+  }
+
+  const auto summary_dir = find_exclusion_summary_dir();
+  if (!summary_dir.has_value()) {
+    error_text = "reconfiguration exclusion is enabled but DCSLOGDIR is unset or not a directory";
+    return false;
+  }
+
+  for (std::size_t i = 0; i < kKc705TofChannelDefs.size(); ++i) {
+    const auto& channel_def = kKc705TofChannelDefs[i];
+    if (channel_def.summary_name == nullptr || channel_def.summary_name[0] == '\0') {
+      continue;
+    }
+
+    const auto summary_path = *summary_dir / (std::string(channel_def.summary_name) + ".tsv");
+    std::ifstream ifs(summary_path);
+    if (!ifs.is_open()) {
+      error_text = "required exclusion summary file not found: " + summary_path.string();
+      return false;
+    }
+
+    std::string line;
+    bool is_first_line = true;
+    while (std::getline(ifs, line)) {
+      if (line.empty()) {
+        continue;
+      }
+      if (is_first_line) {
+        is_first_line = false;
+        continue;
+      }
+
+      const auto columns = split_tsv_line(line);
+      if (columns.size() < 4) {
+        error_text = "invalid exclusion summary row in " + summary_path.string();
+        return false;
+      }
+
+      try {
+        const Double_t start_unix = std::stod(columns[0]);
+        const Double_t end_unix = std::stod(columns[2]);
+        excluded_time_ranges_[i].push_back({start_unix, end_unix});
+      } catch (const std::exception&) {
+        error_text = "invalid exclusion summary timestamp in " + summary_path.string();
+        return false;
+      }
+    }
+
+    std::sort(
+        excluded_time_ranges_[i].begin(),
+        excluded_time_ranges_[i].end(),
+        [](const ExclusionRange& lhs, const ExclusionRange& rhs) { return lhs.start_unix < rhs.start_unix; });
+  }
+
+  return true;
+}
+
+bool Kc705TofOverviewAnalysis::IsExcludedByTimestamp(const Kc705TofEvent& event) const {
+  if (!std::isfinite(event.timestamp)) {
+    return false;
+  }
+
+  const auto sort_index = Kc705TofChannelSortIndex(event.channel_id);
+  if (!sort_index.has_value() || *sort_index >= excluded_time_ranges_.size()) {
+    return false;
+  }
+
+  for (const auto& range : excluded_time_ranges_[*sort_index]) {
+    const Double_t window_start = range.start_unix - kReconfigExclusionMarginSec;
+    const Double_t window_end = range.end_unix + kReconfigExclusionMarginSec;
+    if (event.timestamp >= window_start && event.timestamp <= window_end) {
+      return true;
+    }
+    if (event.timestamp < window_start) {
+      return false;
+    }
+  }
+  return false;
 }
 
 bool Kc705TofOverviewAnalysis::Event(const Kc705TofEvent& Event, std::string& error_text) {
   error_text.clear();
+  if (IsExcludedByTimestamp(Event)) {
+    ++excluded_event_count_;
+    if (const auto sort_index = Kc705TofChannelSortIndex(Event.channel_id); sort_index.has_value()) {
+      ++excluded_event_count_by_channel_[*sort_index];
+    }
+    return true;
+  }
   
   size_t board_index = (Event.board_id == 0x000) ? 0 : 1;
   if (daq_start_time_[board_index] < 0) {
@@ -489,22 +689,22 @@ bool Kc705TofOverviewAnalysis::Event(const Kc705TofEvent& Event, std::string& er
     // Fill the physical TOF only after a first periodic pulse has been observed on this board.
     if (*sort_index < hist_tofs_.size() && has_first_periodic_time_ms_[board_index]) {
       const Double_t tof_ms = event_time_ms - first_periodic_time_ms_[board_index];
-      hist_tofs_[*sort_index]->Fill(tof_ms);
+      fill_histogram_if_in_range(hist_tofs_[*sort_index].get(), tof_ms);
       if (*sort_index < hist_tofs_us_.size()) {
-        hist_tofs_us_[*sort_index]->Fill(tof_ms * 1.0e3);
+        fill_histogram_if_in_range(hist_tofs_us_[*sort_index].get(), tof_ms * 1.0e3);
       }
       const std::size_t group_index = *sort_index / kTofGroupSize;
       if (group_index < hist_tof_groups_.size()) {
-        hist_tof_groups_[group_index]->Fill(tof_ms);
+        fill_histogram_if_in_range(hist_tof_groups_[group_index].get(), tof_ms);
       }
       if (group_index < hist_tof_groups_us_.size()) {
-        hist_tof_groups_us_[group_index]->Fill(tof_ms * 1.0e3);
+        fill_histogram_if_in_range(hist_tof_groups_us_[group_index].get(), tof_ms * 1.0e3);
       }
       if (hist_tof_groups_.size() > 3) {
-        hist_tof_groups_[3]->Fill(tof_ms);
+        fill_histogram_if_in_range(hist_tof_groups_[3].get(), tof_ms);
       }
       if (hist_tof_groups_us_.size() > 3) {
-        hist_tof_groups_us_[3]->Fill(tof_ms * 1.0e3);
+        fill_histogram_if_in_range(hist_tof_groups_us_[3].get(), tof_ms * 1.0e3);
       }
     }
   } else {
@@ -547,6 +747,19 @@ bool Kc705TofOverviewAnalysis::UpdateDrawables(std::string& error_text) {
     graph->GetXaxis()->SetLimits(graph_min - margin, graph_max + margin);
   }
 
+  for (std::size_t i = 0; i < hist_tofs_.size() && i < tof_entry_labels_.size(); ++i) {
+    update_entry_label(tof_entry_labels_[i].get(), hist_tofs_[i].get());
+  }
+  for (std::size_t i = 0; i < hist_tofs_us_.size() && i < tof_us_entry_labels_.size(); ++i) {
+    update_entry_label(tof_us_entry_labels_[i].get(), hist_tofs_us_[i].get());
+  }
+  for (std::size_t i = 0; i < hist_tof_groups_.size() && i < tof_group_entry_labels_.size(); ++i) {
+    update_entry_label(tof_group_entry_labels_[i].get(), hist_tof_groups_[i].get());
+  }
+  for (std::size_t i = 0; i < hist_tof_groups_us_.size() && i < tof_group_us_entry_labels_.size(); ++i) {
+    update_entry_label(tof_group_us_entry_labels_[i].get(), hist_tof_groups_us_[i].get());
+  }
+
   return true;
 }
 
@@ -568,7 +781,12 @@ bool Kc705TofOverviewAnalysisFactory::Create(const ParsedAnalysisSpec& spec,
     return false;
   }
 
-  out_analysis = std::make_unique<Kc705TofOverviewAnalysis>();
+  uint64_t exclude_reconfig = 1;
+  if (!spec.ReadU64("exclude_reconfig", 1, exclude_reconfig, error_text)) {
+    return false;
+  }
+
+  out_analysis = std::make_unique<Kc705TofOverviewAnalysis>(exclude_reconfig != 0);
   error_text.clear();
   return true;
 }
