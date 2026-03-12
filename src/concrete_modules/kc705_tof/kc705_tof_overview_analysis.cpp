@@ -29,6 +29,7 @@ constexpr Double_t kHitDeltaMaxSec = 1000.0;
 constexpr int kHitDeltaBins = 100;
 constexpr Double_t kTofMinMs = -2.0;
 constexpr Double_t kTofMaxMs = 40.0;
+constexpr int kTofBinsMs = 100;
 constexpr Double_t kTofMinUs = 1.0;
 constexpr Double_t kTofMaxUs = 4.0;
 constexpr std::size_t kTofGroupSize = 3;
@@ -467,7 +468,7 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
         Form("TOF Channel %u (%s);TOF (ms);Counts",
              static_cast<unsigned>(channel_def.channel_id),
              channel_def.name),
-        200,
+        kTofBinsMs,
         kTofMinMs,
         kTofMaxMs);
     hist_tof->SetDirectory(nullptr);
@@ -479,7 +480,7 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
         Form("TOF Channel %u (%s);TOF (ms);Counts",
              static_cast<unsigned>(channel_def.channel_id),
              channel_def.name),
-        200,
+        kTofBinsMs,
         kTofMinMs,
         kTofMaxMs);
     hist_tof_filtered->SetDirectory(nullptr);
@@ -491,7 +492,7 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
         Form("TOF Channel %u (%s);TOF (ms);Counts",
              static_cast<unsigned>(channel_def.channel_id),
              channel_def.name),
-        200,
+        kTofBinsMs,
         kTofMinMs,
         kTofMaxMs);
     hist_tof_clean->SetDirectory(nullptr);
@@ -628,7 +629,7 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
     auto hist_tof_group = std::make_unique<TH1D>(
         Form("kc705_tof_group_hist_%s", group_def.name),
         Form("TOF Group %s;TOF (ms);Counts", group_def.name),
-        200,
+        kTofBinsMs,
         kTofMinMs,
         kTofMaxMs);
     hist_tof_group->SetDirectory(nullptr);
@@ -638,7 +639,7 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
     auto hist_tof_group_filtered = std::make_unique<TH1D>(
         Form("kc705_tof_group_filtered_hist_%s", group_def.name),
         Form("TOF Group %s;TOF (ms);Counts", group_def.name),
-        200,
+        kTofBinsMs,
         kTofMinMs,
         kTofMaxMs);
     hist_tof_group_filtered->SetDirectory(nullptr);
@@ -648,7 +649,7 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
     auto hist_tof_group_clean = std::make_unique<TH1D>(
         Form("kc705_tof_group_clean_hist_%s", group_def.name),
         Form("TOF Group %s;TOF (ms);Counts", group_def.name),
-        200,
+        kTofBinsMs,
         kTofMinMs,
         kTofMaxMs);
     hist_tof_group_clean->SetDirectory(nullptr);
@@ -907,10 +908,9 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
   return true;
 }
 
-bool Kc705TofOverviewAnalysis::BeginOfRun(uint32_t run_number, std::string& error_text) {
-  error_text.clear();
-  static_cast<void>(run_number);
-  
+void Kc705TofOverviewAnalysis::SetAccumulateAcrossRuns(bool enabled) { accumulate_across_runs_ = enabled; }
+
+void Kc705TofOverviewAnalysis::ResetAccumulatedHistograms() {
   for (std::size_t stage = 0; stage < kStageNames.size(); ++stage) {
     hist_board_stages_[stage]->Reset();
     hist_channel_stages_[stage]->Reset();
@@ -970,8 +970,13 @@ bool Kc705TofOverviewAnalysis::BeginOfRun(uint32_t run_number, std::string& erro
   for (auto& hist_tof_group_us : hist_tof_groups_us_clean_) {
     hist_tof_group_us->Reset();
   }
-  min_time_ = 1e100;
-  max_time_ = -1e100;
+}
+
+void Kc705TofOverviewAnalysis::ResetPerRunState(bool reset_time_range, bool reset_periodic_graphs) {
+  if (reset_time_range) {
+    min_time_ = 1e100;
+    max_time_ = -1e100;
+  }
   excluded_event_count_ = 0;
   excluded_event_count_by_channel_.fill(0);
   daq_start_time_[0] = daq_start_time_[1] = -1;
@@ -982,13 +987,25 @@ bool Kc705TofOverviewAnalysis::BeginOfRun(uint32_t run_number, std::string& erro
   hit_pair_state_.has_last_timestamp_sec_.fill(false);
   hit_pair_state_filtered_.has_last_timestamp_sec_.fill(false);
   deferred_clean_hits_.fill(std::nullopt);
-  for (auto& graph : periodic_rate_graphs_) {
-    graph->Set(0);
-  }
   for (auto& event_times : periodic_event_times_) {
     event_times.clear();
   }
-  
+  if (reset_periodic_graphs) {
+    for (auto& graph : periodic_rate_graphs_) {
+      graph->Set(0);
+    }
+  }
+}
+
+bool Kc705TofOverviewAnalysis::BeginOfRun(uint32_t run_number, std::string& error_text) {
+  error_text.clear();
+  static_cast<void>(run_number);
+ 
+  if (!accumulate_across_runs_) {
+    ResetAccumulatedHistograms();
+  }
+  ResetPerRunState(!accumulate_across_runs_, !accumulate_across_runs_);
+
   return true;
 }
 

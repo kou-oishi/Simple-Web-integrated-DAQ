@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -24,9 +25,10 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
 
   bool Initialise(std::string& error_text) override;
   bool BeginOfRun(uint32_t run_number, std::string& error_text) override;
- bool EndOfRun(uint32_t run_number, std::string& error_text) override;
+  bool EndOfRun(uint32_t run_number, std::string& error_text) override;
   bool UpdateDrawables(std::string& error_text) override;
   bool Finalise(std::string& error_text) override;
+  void SetAccumulateAcrossRuns(bool enabled) override;
 
  private:
   template <typename T>
@@ -68,10 +70,13 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
   void ProcessCleanCandidate(const DeferredNamedHit& current);
   void FillCleanNamedHit(const DeferredNamedHit& hit);
   void FlushExpiredCleanCandidates(bool flush_all);
+  void ResetAccumulatedHistograms();
+  void ResetPerRunState(bool reset_time_range, bool reset_periodic_graphs);
 
   Double_t daq_start_time_[2] = {-1, -1};
   Double_t min_time_ = 1e100, max_time_ = -1e100;
   bool enable_exclusion_filter_ = true;
+  bool accumulate_across_runs_ = false;
   Double_t clean_cluster_sec_ = 1.0;
   std::array<std::vector<ExclusionRange>, Kc705TofNamedChannelCount()> excluded_time_ranges_;
   uint64_t excluded_event_count_ = 0;
