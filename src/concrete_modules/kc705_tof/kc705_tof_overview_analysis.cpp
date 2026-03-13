@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -32,11 +33,28 @@ constexpr Double_t kTofMaxMs = 40.0;
 constexpr int kTofBinsMs = 100;
 constexpr Double_t kTofMinUs = 1.0;
 constexpr Double_t kTofMaxUs = 4.0;
+constexpr Double_t kEnergyMinMeV = 1.0e-8;
+constexpr Double_t kEnergyMaxMeV = 1.0e3;
+constexpr int kEnergyBins = 37;
+constexpr Double_t kNeutronFlightPathM = 14.0;
+constexpr Double_t kTofOffsetMs = 0.002;
+constexpr Double_t kNeutronRestMassMeV = 939.56542052;
+constexpr Double_t kSpeedOfLightMPerSec = 299792458.0;
 constexpr std::size_t kTofGroupSize = 3;
 constexpr std::size_t kPeriodicTrendPoints = 1000;
 constexpr std::size_t kStageAll = 0;
 constexpr std::size_t kStageFiltered = 1;
 constexpr std::size_t kStageClean = 2;
+constexpr std::array<Double_t, 8> kStatsTofBinEdgesMs = {0.0, 0.5, 5.0, 10.0, 15.0, 20.0, 30.0, 40.0};
+constexpr std::array<const char*, 7> kStatsTofBinLabels = {
+    "tof_0_0p5_ms",
+    "tof_0p5_5_ms",
+    "tof_5_10_ms",
+    "tof_10_15_ms",
+    "tof_15_20_ms",
+    "tof_20_30_ms",
+    "tof_30_40_ms",
+};
 constexpr std::array<const char*, 3> kStageNames = {"All", "Filtered", "Clean"};
 constexpr std::array<Color_t, 3> kStageColors = {kBlack, kBlue + 1, kRed + 1};
 constexpr std::array<Double_t, 3> kStageLabelY = {0.86, 0.78, 0.70};
@@ -214,6 +232,60 @@ std::array<Double_t, kHitDeltaBins + 1> make_log_bins(Double_t min_value, Double
   return edges;
 }
 
+std::vector<Double_t> make_log_bins_vector(int n_bins, Double_t min_value, Double_t max_value) {
+  std::vector<Double_t> edges(static_cast<std::size_t>(n_bins) + 1);
+  const Double_t log_min = std::log10(min_value);
+  const Double_t log_max = std::log10(max_value);
+  for (int i = 0; i <= n_bins; ++i) {
+    const Double_t fraction = static_cast<Double_t>(i) / static_cast<Double_t>(n_bins);
+    edges[static_cast<std::size_t>(i)] = std::pow(10.0, log_min + fraction * (log_max - log_min));
+  }
+  return edges;
+}
+
+double compute_neutron_energy_mev_from_tof_ms(Double_t tof_ms) {
+  const Double_t corrected_tof_sec = tof_ms * 1.0e-3 - kTofOffsetMs * 1.0e-3;
+  if (!std::isfinite(corrected_tof_sec) || corrected_tof_sec <= 0.0) {
+    return std::numeric_limits<Double_t>::quiet_NaN();
+  }
+  const Double_t beta = kNeutronFlightPathM / (kSpeedOfLightMPerSec * corrected_tof_sec);
+  if (!std::isfinite(beta) || beta <= 0.0 || beta >= 1.0) {
+    return std::numeric_limits<Double_t>::quiet_NaN();
+  }
+  const Double_t gamma = 1.0 / std::sqrt(1.0 - beta * beta);
+  return (gamma - 1.0) * kNeutronRestMassMeV;
+}
+
+std::string format_energy_bin_label(std::size_t bin_index) {
+  const Double_t log_min = std::log10(kEnergyMinMeV);
+  const Double_t log_max = std::log10(kEnergyMaxMeV);
+  const Double_t low = std::pow(10.0, log_min + (static_cast<Double_t>(bin_index) / static_cast<Double_t>(kEnergyBins)) * (log_max - log_min));
+  const Double_t high =
+      std::pow(10.0, log_min + (static_cast<Double_t>(bin_index + 1) / static_cast<Double_t>(kEnergyBins)) * (log_max - log_min));
+  std::ostringstream oss;
+  oss << std::scientific << std::setprecision(3)
+      << "clean_e_" << low << "_" << high << "_MeV";
+  return oss.str();
+}
+
+std::string format_optional_tsv_number(bool has_value, double value) {
+  if (!has_value || !std::isfinite(value)) {
+    return "";
+  }
+  std::ostringstream oss;
+  oss << std::fixed << std::setprecision(3) << value;
+  return oss.str();
+}
+
+std::string format_optional_tsv_seconds(bool has_value, double value) {
+  if (!has_value || !std::isfinite(value)) {
+    return "";
+  }
+  std::ostringstream oss;
+  oss << static_cast<long long>(std::llround(value));
+  return oss.str();
+}
+
 }  // namespace
 
 bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
@@ -259,6 +331,9 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
   canvas_tof_groups_ = std::make_unique<TCanvas>("kc705_tof_groups_canvas", "KC705 TOF: Grouped TOFs", 1200, 900);
   canvas_tof_groups_us_ =
       std::make_unique<TCanvas>("kc705_tof_groups_us_canvas", "KC705 TOF: Grouped TOFs (0-2 us)", 1200, 900);
+  canvas_energies_ = std::make_unique<TCanvas>("kc705_energies_canvas", "KC705 TOF: Neutron Energy", 1500, 1000);
+  canvas_energy_groups_ =
+      std::make_unique<TCanvas>("kc705_energy_groups_canvas", "KC705 TOF: Grouped Neutron Energy", 1200, 900);
   const int num_named_channels = static_cast<int>(Kc705TofNamedChannelCount());
   const int num_tof_columns = to_canvas_grid(num_named_channels);
   const int num_tof_rows = static_cast<int>(std::ceil(static_cast<double>(num_named_channels) / num_tof_columns));
@@ -266,8 +341,10 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
   canvas_tofs_->Divide(num_tof_columns, num_tof_rows);
   canvas_tofs_us_->Divide(num_tof_columns, num_tof_rows);
   canvas_hit_deltas_->Divide(num_tof_columns, num_tof_rows);
+  canvas_energies_->Divide(num_tof_columns, num_tof_rows);
   canvas_tof_groups_->Divide(2, 2);
   canvas_tof_groups_us_->Divide(2, 2);
+  canvas_energy_groups_->Divide(2, 2);
   for (int i = 1; i <= num_named_channels; ++i) {
     auto* tdc_pad = canvas_tdcs_->cd(i);
     if (tdc_pad != nullptr) {
@@ -297,6 +374,14 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
       hit_delta_pad->SetLogx();
       hit_delta_pad->SetLogy();
     }
+    auto* energy_pad = canvas_energies_->cd(i);
+    if (energy_pad != nullptr) {
+      energy_pad->SetLeftMargin(0.15);
+      energy_pad->SetBottomMargin(0.15);
+      energy_pad->SetRightMargin(0.05);
+      energy_pad->SetLogx();
+      energy_pad->SetLogy();
+    }
   }
   for (int i = 1; i <= 4; ++i) {
     auto* tof_group_pad = canvas_tof_groups_->cd(i);
@@ -311,6 +396,14 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
       tof_group_us_pad->SetLeftMargin(0.15);
       tof_group_us_pad->SetBottomMargin(0.15);
       tof_group_us_pad->SetRightMargin(0.05);
+    }
+    auto* energy_group_pad = canvas_energy_groups_->cd(i);
+    if (energy_group_pad != nullptr) {
+      energy_group_pad->SetLeftMargin(0.15);
+      energy_group_pad->SetBottomMargin(0.15);
+      energy_group_pad->SetRightMargin(0.05);
+      energy_group_pad->SetLogx();
+      energy_group_pad->SetLogy();
     }
   }
   for (int i = num_named_channels + 1; i <= num_tof_columns * num_tof_rows; ++i) {
@@ -339,6 +432,14 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
       hit_delta_pad->SetRightMargin(0.05);
       hit_delta_pad->SetLogx();
       hit_delta_pad->SetLogy();
+    }
+    auto* energy_pad = canvas_energies_->cd(i);
+    if (energy_pad != nullptr) {
+      energy_pad->SetLeftMargin(0.15);
+      energy_pad->SetBottomMargin(0.15);
+      energy_pad->SetRightMargin(0.05);
+      energy_pad->SetLogx();
+      energy_pad->SetLogy();
     }
   }
 
@@ -421,7 +522,10 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
   hit_delta_all_entry_labels_.reserve(Kc705TofNamedChannelCount());
   hit_delta_filtered_entry_labels_.reserve(Kc705TofNamedChannelCount());
   hit_delta_clean_entry_labels_.reserve(Kc705TofNamedChannelCount());
+  hist_energies_clean_.reserve(Kc705TofNamedChannelCount());
+  energy_clean_entry_labels_.reserve(Kc705TofNamedChannelCount());
   const auto hit_delta_bins = make_log_bins(kHitDeltaMinSec, kHitDeltaMaxSec);
+  const auto energy_bins = make_log_bins_vector(kEnergyBins, kEnergyMinMeV, kEnergyMaxMeV);
   for (std::size_t i = 0; i < Kc705TofNamedChannelCount(); ++i) {
     const auto& channel_def = kKc705TofChannelDefs[i];
     // "TDC" keeps the original event time relative to the DAQ start.
@@ -612,6 +716,22 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
         make_entry_label(Form("kc705_hit_delta_clean_entries_ch%02u", static_cast<unsigned>(channel_def.channel_id)));
     hit_delta_clean_label->SetTextColor(kRed + 1);
     hit_delta_clean_entry_labels_.push_back(std::move(hit_delta_clean_label));
+
+    auto hist_energy_clean = std::make_unique<TH1D>(
+        Form("kc705_energy_clean_hist_ch%02u", static_cast<unsigned>(channel_def.channel_id)),
+        Form("Neutron Energy Channel %u (%s);Energy (MeV);Counts",
+             static_cast<unsigned>(channel_def.channel_id),
+             channel_def.name),
+        kEnergyBins,
+        energy_bins.data());
+    hist_energy_clean->SetDirectory(nullptr);
+    style_outline_hist(hist_energy_clean.get(), kRed + 1);
+    set_log_hist_minimum(hist_energy_clean.get());
+    hist_energies_clean_.push_back(std::move(hist_energy_clean));
+    auto energy_clean_label =
+        make_entry_label(Form("kc705_energy_clean_entries_ch%02u", static_cast<unsigned>(channel_def.channel_id)));
+    energy_clean_label->SetTextColor(kRed + 1);
+    energy_clean_entry_labels_.push_back(std::move(energy_clean_label));
   }
   hist_tof_groups_.reserve(kTofGroupDefs.size());
   hist_tof_groups_filtered_.reserve(kTofGroupDefs.size());
@@ -619,12 +739,14 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
   hist_tof_groups_us_.reserve(kTofGroupDefs.size());
   hist_tof_groups_us_filtered_.reserve(kTofGroupDefs.size());
   hist_tof_groups_us_clean_.reserve(kTofGroupDefs.size());
+  hist_energy_groups_clean_.reserve(kTofGroupDefs.size());
   tof_group_entry_labels_.reserve(kTofGroupDefs.size());
   tof_group_filtered_entry_labels_.reserve(kTofGroupDefs.size());
   tof_group_clean_entry_labels_.reserve(kTofGroupDefs.size());
   tof_group_us_entry_labels_.reserve(kTofGroupDefs.size());
   tof_group_us_filtered_entry_labels_.reserve(kTofGroupDefs.size());
   tof_group_us_clean_entry_labels_.reserve(kTofGroupDefs.size());
+  energy_group_clean_entry_labels_.reserve(kTofGroupDefs.size());
   for (const auto& group_def : kTofGroupDefs) {
     auto hist_tof_group = std::make_unique<TH1D>(
         Form("kc705_tof_group_hist_%s", group_def.name),
@@ -685,6 +807,16 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
     style_transparent_fill_hist(hist_tof_group_us_clean.get(), kRed + 1, 0.70f);
     hist_tof_groups_us_clean_.push_back(std::move(hist_tof_group_us_clean));
 
+    auto hist_energy_group_clean = std::make_unique<TH1D>(
+        Form("kc705_energy_group_clean_hist_%s", group_def.name),
+        Form("Neutron Energy Group %s;Energy (MeV);Counts", group_def.name),
+        kEnergyBins,
+        energy_bins.data());
+    hist_energy_group_clean->SetDirectory(nullptr);
+    style_outline_hist(hist_energy_group_clean.get(), kRed + 1);
+    set_log_hist_minimum(hist_energy_group_clean.get());
+    hist_energy_groups_clean_.push_back(std::move(hist_energy_group_clean));
+
     tof_group_entry_labels_.push_back(make_entry_label(Form("kc705_tof_group_entries_%s", group_def.name)));
     tof_group_entry_labels_.back()->SetTextColor(kBlack);
     tof_group_filtered_entry_labels_.push_back(make_entry_label(Form("kc705_tof_group_filtered_entries_%s", group_def.name)));
@@ -698,6 +830,8 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
     tof_group_us_filtered_entry_labels_.back()->SetTextColor(kBlue + 1);
     tof_group_us_clean_entry_labels_.push_back(make_entry_label(Form("kc705_tof_group_us_clean_entries_%s", group_def.name)));
     tof_group_us_clean_entry_labels_.back()->SetTextColor(kRed + 1);
+    energy_group_clean_entry_labels_.push_back(make_entry_label(Form("kc705_energy_group_clean_entries_%s", group_def.name)));
+    energy_group_clean_entry_labels_.back()->SetTextColor(kRed + 1);
   }
   constexpr std::array<int, Kc705TofPeriodicChannelCount()> kPeriodicGraphColors = {kRed + 1, kBlue + 1};
   for (std::size_t i = 0; i < Kc705TofPeriodicChannelCount(); ++i) {
@@ -765,6 +899,9 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
   for (auto& hist_hit_delta : hist_hit_deltas_clean_) {
     apply_axis_text_style(hist_hit_delta.get(), 0.06, 0.07);
   }
+  for (auto& hist_energy : hist_energies_clean_) {
+    apply_axis_text_style(hist_energy.get(), 0.06, 0.07);
+  }
   for (auto& hist_tof_group : hist_tof_groups_) {
     apply_axis_text_style(hist_tof_group.get(), 0.06, 0.07);
   }
@@ -783,6 +920,9 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
   for (auto& hist_tof_group_us : hist_tof_groups_us_clean_) {
     apply_axis_text_style(hist_tof_group_us.get(), 0.06, 0.07);
   }
+  for (auto& hist_energy_group : hist_energy_groups_clean_) {
+    apply_axis_text_style(hist_energy_group.get(), 0.06, 0.07);
+  }
   for (auto& graph : periodic_rate_graphs_) {
     update_graph_axis_style(graph.get(), 0.05, 0.06);
   }
@@ -795,8 +935,10 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
       !RegisterCanvas(canvas_tofs_.get(), error_text) ||
       !RegisterCanvas(canvas_tofs_us_.get(), error_text) ||
       !RegisterCanvas(canvas_hit_deltas_.get(), error_text) ||
+      !RegisterCanvas(canvas_energies_.get(), error_text) ||
       !RegisterCanvas(canvas_tof_groups_.get(), error_text) ||
-      !RegisterCanvas(canvas_tof_groups_us_.get(), error_text)) {
+      !RegisterCanvas(canvas_tof_groups_us_.get(), error_text) ||
+      !RegisterCanvas(canvas_energy_groups_.get(), error_text)) {
     return false;
   }
 
@@ -879,6 +1021,11 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
     if (!RegisterDrawable(hit_delta_pad, hit_delta_clean_entry_labels_[i].get(), "SAME", error_text)) {
       return false;
     }
+    auto* energy_pad = canvas_energies_->cd(static_cast<int>(i + 1));
+    if (!RegisterDrawable(energy_pad, hist_energies_clean_[i].get(), "", error_text) ||
+        !RegisterDrawable(energy_pad, energy_clean_entry_labels_[i].get(), "SAME", error_text)) {
+      return false;
+    }
   }
   for (std::size_t i = 0; i < hist_tof_groups_.size(); ++i) {
     auto* tof_group_pad = canvas_tof_groups_->cd(static_cast<int>(i + 1));
@@ -903,12 +1050,24 @@ bool Kc705TofOverviewAnalysis::Initialise(std::string& error_text) {
         !RegisterDrawable(tof_group_us_pad, tof_group_us_clean_entry_labels_[i].get(), "SAME", error_text)) {
       return false;
     }
+    auto* energy_group_pad = canvas_energy_groups_->cd(static_cast<int>(i + 1));
+    if (!RegisterDrawable(energy_group_pad, hist_energy_groups_clean_[i].get(), "", error_text) ||
+        !RegisterDrawable(energy_group_pad, energy_group_clean_entry_labels_[i].get(), "SAME", error_text)) {
+      return false;
+    }
   }
 
   return true;
 }
 
 void Kc705TofOverviewAnalysis::SetAccumulateAcrossRuns(bool enabled) { accumulate_across_runs_ = enabled; }
+
+void Kc705TofOverviewAnalysis::SetRunTimeInfo(const std::vector<RealtimeRunTimeInfo>& run_time_info) {
+  run_time_info_by_run_.clear();
+  for (const auto& entry : run_time_info) {
+    run_time_info_by_run_[entry.run_number] = entry;
+  }
+}
 
 void Kc705TofOverviewAnalysis::ResetAccumulatedHistograms() {
   for (std::size_t stage = 0; stage < kStageNames.size(); ++stage) {
@@ -952,6 +1111,9 @@ void Kc705TofOverviewAnalysis::ResetAccumulatedHistograms() {
   for (auto& hist_hit_delta : hist_hit_deltas_clean_) {
     hist_hit_delta->Reset();
   }
+  for (auto& hist_energy : hist_energies_clean_) {
+    hist_energy->Reset();
+  }
   for (auto& hist_tof_group : hist_tof_groups_) {
     hist_tof_group->Reset();
   }
@@ -969,6 +1131,9 @@ void Kc705TofOverviewAnalysis::ResetAccumulatedHistograms() {
   }
   for (auto& hist_tof_group_us : hist_tof_groups_us_clean_) {
     hist_tof_group_us->Reset();
+  }
+  for (auto& hist_energy_group : hist_energy_groups_clean_) {
+    hist_energy_group->Reset();
   }
 }
 
@@ -997,14 +1162,182 @@ void Kc705TofOverviewAnalysis::ResetPerRunState(bool reset_time_range, bool rese
   }
 }
 
+void Kc705TofOverviewAnalysis::FillTofBinCounts(StageSummary& summary, Double_t tof_ms) {
+  for (std::size_t i = 0; i + 1 < kStatsTofBinEdgesMs.size(); ++i) {
+    if (tof_ms >= kStatsTofBinEdgesMs[i] && tof_ms < kStatsTofBinEdgesMs[i + 1]) {
+      ++summary.tof_bin_counts[i];
+      return;
+    }
+  }
+}
+
+void Kc705TofOverviewAnalysis::FillEnergyBinCounts(StageSummary& summary, Double_t energy_mev) {
+  if (!std::isfinite(energy_mev) || energy_mev < kEnergyMinMeV || energy_mev >= kEnergyMaxMeV) {
+    return;
+  }
+  const Double_t log_min = std::log10(kEnergyMinMeV);
+  const Double_t log_max = std::log10(kEnergyMaxMeV);
+  const Double_t fraction = (std::log10(energy_mev) - log_min) / (log_max - log_min);
+  const std::size_t bin_index = std::min<std::size_t>(
+      static_cast<std::size_t>(kEnergyBins) - 1,
+      static_cast<std::size_t>(std::floor(fraction * static_cast<Double_t>(kEnergyBins))));
+  ++summary.energy_bin_counts[bin_index];
+}
+
+double Kc705TofOverviewAnalysis::ComputeExcludedDurationSec(std::size_t channel_index,
+                                                            const RealtimeRunTimeInfo& run_time_info) const {
+  if (!run_time_info.has_sql_time) {
+    return 0.0;
+  }
+  if (channel_index >= excluded_time_ranges_.size()) {
+    return 0.0;
+  }
+
+  double excluded_sec = 0.0;
+  for (const auto& segment : run_time_info.segments) {
+    if (!std::isfinite(segment.start_unix_sec) || !std::isfinite(segment.end_unix_sec) ||
+        segment.end_unix_sec <= segment.start_unix_sec) {
+      continue;
+    }
+
+    std::vector<std::pair<double, double>> overlaps;
+    for (const auto& raw_range : excluded_time_ranges_[channel_index]) {
+      const ExclusionRange range = {
+          raw_range.start_unix - kReconfigExclusionMarginSec,
+          raw_range.end_unix + kReconfigExclusionMarginSec,
+      };
+      if (range.end_unix <= segment.start_unix_sec) {
+        continue;
+      }
+      if (range.start_unix >= segment.end_unix_sec) {
+        break;
+      }
+      const double overlap_start = std::max<double>(segment.start_unix_sec, range.start_unix);
+      const double overlap_end = std::min<double>(segment.end_unix_sec, range.end_unix);
+      if (overlap_end > overlap_start) {
+        overlaps.emplace_back(overlap_start, overlap_end);
+      }
+    }
+
+    if (overlaps.empty()) {
+      continue;
+    }
+
+    std::sort(overlaps.begin(), overlaps.end());
+    double merged_start = overlaps.front().first;
+    double merged_end = overlaps.front().second;
+    for (std::size_t i = 1; i < overlaps.size(); ++i) {
+      const auto& [next_start, next_end] = overlaps[i];
+      if (next_start > merged_end) {
+        excluded_sec += merged_end - merged_start;
+        merged_start = next_start;
+        merged_end = next_end;
+      } else {
+        merged_end = std::max(merged_end, next_end);
+      }
+    }
+    excluded_sec += merged_end - merged_start;
+  }
+  return excluded_sec;
+}
+
+void Kc705TofOverviewAnalysis::PrintSpreadsheetHeaderIfNeeded() {
+  if (spreadsheet_header_printed_) {
+    return;
+  }
+  spreadsheet_header_printed_ = true;
+  std::cout << "[kc705_tof_overview_stats_tsv]\n";
+  std::cout << "run\t"
+            << "channel_id\t"
+            << "channel_name\t"
+            << "daq_time_sec\t"
+            << "live_time_sec\t"
+            << "raw_events\t"
+            << "filtered_events\t"
+            << "clean_events";
+  for (const char* label : kStatsTofBinLabels) {
+    std::cout << '\t' << "raw_" << label;
+  }
+  for (const char* label : kStatsTofBinLabels) {
+    std::cout << '\t' << "filtered_" << label;
+  }
+  for (const char* label : kStatsTofBinLabels) {
+    std::cout << '\t' << "clean_" << label;
+  }
+  for (int i = 0; i < kEnergyBins; ++i) {
+    std::cout << '\t' << format_energy_bin_label(static_cast<std::size_t>(i));
+  }
+  std::cout << '\n';
+}
+
+void Kc705TofOverviewAnalysis::PrintSpreadsheetRow(uint32_t run_number,
+                                                   std::size_t channel_index,
+                                                   const ChannelSummary& summary,
+                                                   bool is_total) {
+  PrintSpreadsheetHeaderIfNeeded();
+  if (channel_index >= kKc705TofChannelDefs.size()) {
+    return;
+  }
+  const auto& channel_def = kKc705TofChannelDefs[channel_index];
+
+  bool has_sql_time = false;
+  double daq_time_sec = 0.0;
+  double live_time_sec = 0.0;
+  if (is_total) {
+    for (const auto& [stored_run_number, info] : run_time_info_by_run_) {
+      if (!info.has_sql_time) {
+        continue;
+      }
+      has_sql_time = true;
+      daq_time_sec += info.daq_time_sec;
+      live_time_sec += std::max(0.0, info.daq_time_sec - ComputeExcludedDurationSec(channel_index, info));
+      static_cast<void>(stored_run_number);
+    }
+  } else {
+    const auto it = run_time_info_by_run_.find(run_number);
+    if (it != run_time_info_by_run_.end() && it->second.has_sql_time) {
+      has_sql_time = true;
+      daq_time_sec = it->second.daq_time_sec;
+      live_time_sec = std::max(0.0, daq_time_sec - ComputeExcludedDurationSec(channel_index, it->second));
+    }
+  }
+
+  std::cout << (is_total ? "TOTAL" : std::to_string(run_number)) << '\t'
+            << static_cast<unsigned>(channel_def.channel_id) << '\t'
+            << channel_def.name << '\t'
+            << format_optional_tsv_seconds(has_sql_time, daq_time_sec) << '\t'
+            << format_optional_tsv_seconds(has_sql_time, live_time_sec) << '\t'
+            << summary.raw.event_count << '\t'
+            << summary.filtered.event_count << '\t'
+            << summary.clean.event_count;
+  for (std::size_t i = 0; i < summary.raw.tof_bin_counts.size(); ++i) {
+    std::cout << '\t' << summary.raw.tof_bin_counts[i];
+  }
+  for (std::size_t i = 0; i < summary.filtered.tof_bin_counts.size(); ++i) {
+    std::cout << '\t' << summary.filtered.tof_bin_counts[i];
+  }
+  for (std::size_t i = 0; i < summary.clean.tof_bin_counts.size(); ++i) {
+    std::cout << '\t' << summary.clean.tof_bin_counts[i];
+  }
+  for (std::size_t i = 0; i < summary.clean.energy_bin_counts.size(); ++i) {
+    std::cout << '\t' << summary.clean.energy_bin_counts[i];
+  }
+  std::cout << '\n';
+}
+
 bool Kc705TofOverviewAnalysis::BeginOfRun(uint32_t run_number, std::string& error_text) {
   error_text.clear();
-  static_cast<void>(run_number);
+  if (!accumulate_across_runs_) {
+    run_summary_by_run_.clear();
+    spreadsheet_header_printed_ = false;
+  }
  
   if (!accumulate_across_runs_) {
     ResetAccumulatedHistograms();
   }
   ResetPerRunState(!accumulate_across_runs_, !accumulate_across_runs_);
+
+  run_summary_by_run_[run_number];
 
   return true;
 }
@@ -1028,6 +1361,12 @@ bool Kc705TofOverviewAnalysis::EndOfRun(uint32_t run_number, std::string& error_
       std::cout << ")";
     }
     std::cout << '\n';
+  }
+  const auto it = run_summary_by_run_.find(run_number);
+  if (it != run_summary_by_run_.end()) {
+    for (std::size_t channel_index = 0; channel_index < it->second.size(); ++channel_index) {
+      PrintSpreadsheetRow(run_number, channel_index, it->second[channel_index], false);
+    }
   }
   return true;
 }
@@ -1077,6 +1416,9 @@ bool Kc705TofOverviewAnalysis::LoadExcludedTimeRanges(std::string& error_text) {
       try {
         const Double_t start_unix = std::stod(columns[0]);
         const Double_t end_unix = std::stod(columns[2]);
+        if (!std::isfinite(start_unix) || !std::isfinite(end_unix) || end_unix < start_unix) {
+          continue;
+        }
         excluded_time_ranges_[i].push_back({start_unix, end_unix});
       } catch (const std::exception&) {
         error_text = "invalid exclusion summary timestamp in " + summary_path.string();
@@ -1111,6 +1453,8 @@ void Kc705TofOverviewAnalysis::ProcessHitDelta(HitPairState& state,
 }
 
 void Kc705TofOverviewAnalysis::FillCleanNamedHit(const DeferredNamedHit& hit) {
+  auto& clean_summary = run_summary_by_run_[hit.run_number][hit.channel_index].clean;
+  ++clean_summary.event_count;
   hist_board_stages_[kStageClean]->Fill(0.5 + static_cast<double>(hit.board_index));
   hist_channel_stages_[kStageClean]->Fill(0.5 + static_cast<double>(hit.channel_index));
   hist_channel_named_stages_[kStageClean]->Fill(0.5 + static_cast<double>(hit.channel_index));
@@ -1119,6 +1463,9 @@ void Kc705TofOverviewAnalysis::FillCleanNamedHit(const DeferredNamedHit& hit) {
   }
   if (hit.has_tof_reference) {
     const Double_t tof_ms = hit.event_time_ms - hit.first_periodic_time_ms;
+    FillTofBinCounts(clean_summary, tof_ms);
+    const Double_t energy_mev = compute_neutron_energy_mev_from_tof_ms(tof_ms);
+    FillEnergyBinCounts(clean_summary, energy_mev);
     if (hit.channel_index < hist_tofs_clean_.size()) {
       fill_histogram_if_in_range(hist_tofs_clean_[hit.channel_index].get(), tof_ms);
     }
@@ -1137,6 +1484,15 @@ void Kc705TofOverviewAnalysis::FillCleanNamedHit(const DeferredNamedHit& hit) {
     }
     if (hist_tof_groups_us_clean_.size() > 3) {
       fill_histogram_if_in_range(hist_tof_groups_us_clean_[3].get(), tof_ms * 1.0e3);
+    }
+    if (hit.channel_index < hist_energies_clean_.size()) {
+      fill_histogram_if_in_range(hist_energies_clean_[hit.channel_index].get(), energy_mev);
+    }
+    if (group_index < hist_energy_groups_clean_.size()) {
+      fill_histogram_if_in_range(hist_energy_groups_clean_[group_index].get(), energy_mev);
+    }
+    if (hist_energy_groups_clean_.size() > 3) {
+      fill_histogram_if_in_range(hist_energy_groups_clean_[3].get(), energy_mev);
     }
   }
   if (hit.has_prev_filtered && hit.left_gap_large &&
@@ -1241,6 +1597,8 @@ bool Kc705TofOverviewAnalysis::Event(const Kc705TofEvent& Event,
   }
 
   if (sort_index.has_value()) {
+    auto& raw_summary = run_summary_by_run_[message.run_number][*sort_index].raw;
+    ++raw_summary.event_count;
     hist_board_stages_[kStageAll]->Fill(0.5 + static_cast<double>(board_index));
     hist_channel_stages_[kStageAll]->Fill(0.5 + static_cast<double>(*sort_index));
     hist_channel_named_stages_[kStageAll]->Fill(0.5 + static_cast<double>(*sort_index));
@@ -1249,6 +1607,7 @@ bool Kc705TofOverviewAnalysis::Event(const Kc705TofEvent& Event,
     }
     if (*sort_index < hist_tofs_.size() && has_first_periodic_time_ms_[board_index]) {
       const Double_t tof_ms = event_time_ms - first_periodic_time_ms_[board_index];
+      FillTofBinCounts(raw_summary, tof_ms);
       fill_histogram_if_in_range(hist_tofs_[*sort_index].get(), tof_ms);
       if (*sort_index < hist_tofs_us_.size()) {
         fill_histogram_if_in_range(hist_tofs_us_[*sort_index].get(), tof_ms * 1.0e3);
@@ -1277,6 +1636,8 @@ bool Kc705TofOverviewAnalysis::Event(const Kc705TofEvent& Event,
     return true;
   }
 
+  auto& filtered_summary = run_summary_by_run_[message.run_number][*sort_index].filtered;
+  ++filtered_summary.event_count;
   hist_board_stages_[kStageFiltered]->Fill(0.5 + static_cast<double>(board_index));
   hist_channel_stages_[kStageFiltered]->Fill(0.5 + static_cast<double>(*sort_index));
   hist_channel_named_stages_[kStageFiltered]->Fill(0.5 + static_cast<double>(*sort_index));
@@ -1284,6 +1645,7 @@ bool Kc705TofOverviewAnalysis::Event(const Kc705TofEvent& Event,
   ProcessHitDelta(hit_pair_state_filtered_, hist_hit_deltas_filtered_, *sort_index, Event.timestamp);
 
   DeferredNamedHit clean_hit;
+  clean_hit.run_number = message.run_number;
   clean_hit.channel_index = *sort_index;
   clean_hit.board_index = board_index;
   clean_hit.timestamp_sec = Event.timestamp;
@@ -1296,6 +1658,7 @@ bool Kc705TofOverviewAnalysis::Event(const Kc705TofEvent& Event,
 
   if (*sort_index < hist_tofs_.size() && has_first_periodic_time_ms_[board_index]) {
     const Double_t tof_ms = event_time_ms - first_periodic_time_ms_[board_index];
+    FillTofBinCounts(filtered_summary, tof_ms);
     fill_histogram_if_in_range(hist_tofs_filtered_[*sort_index].get(), tof_ms);
     if (*sort_index < hist_tofs_us_.size()) {
       fill_histogram_if_in_range(hist_tofs_us_filtered_[*sort_index].get(), tof_ms * 1.0e3);
@@ -1438,6 +1801,9 @@ bool Kc705TofOverviewAnalysis::UpdateDrawables(std::string& error_text) {
   for (std::size_t i = 0; i < hist_hit_deltas_clean_.size() && i < hit_delta_clean_entry_labels_.size(); ++i) {
     update_entry_label(hit_delta_clean_entry_labels_[i].get(), hist_hit_deltas_clean_[i].get(), 0.18, 0.70, "Clean");
   }
+  for (std::size_t i = 0; i < hist_energies_clean_.size() && i < energy_clean_entry_labels_.size(); ++i) {
+    update_entry_label(energy_clean_entry_labels_[i].get(), hist_energies_clean_[i].get(), 0.18, 0.70, "Clean");
+  }
   for (std::size_t i = 0; i < hist_tof_groups_.size() && i < tof_group_entry_labels_.size(); ++i) {
     update_entry_label(tof_group_entry_labels_[i].get(), hist_tof_groups_[i].get(), 0.18, 0.86, "All");
     update_entry_label(tof_group_filtered_entry_labels_[i].get(),
@@ -1460,12 +1826,39 @@ bool Kc705TofOverviewAnalysis::UpdateDrawables(std::string& error_text) {
                        0.70,
                        "Clean");
   }
+  for (std::size_t i = 0; i < hist_energy_groups_clean_.size() && i < energy_group_clean_entry_labels_.size(); ++i) {
+    update_entry_label(energy_group_clean_entry_labels_[i].get(), hist_energy_groups_clean_[i].get(), 0.18, 0.70, "Clean");
+  }
 
   return true;
 }
 
 bool Kc705TofOverviewAnalysis::Finalise(std::string& error_text) {
   error_text.clear();
+  if (!run_summary_by_run_.empty()) {
+    PerRunSummary total_summary = {};
+    for (const auto& [run_number, summary_by_channel] : run_summary_by_run_) {
+      for (std::size_t channel_index = 0; channel_index < summary_by_channel.size(); ++channel_index) {
+        total_summary[channel_index].raw.event_count += summary_by_channel[channel_index].raw.event_count;
+        total_summary[channel_index].filtered.event_count += summary_by_channel[channel_index].filtered.event_count;
+        total_summary[channel_index].clean.event_count += summary_by_channel[channel_index].clean.event_count;
+        for (std::size_t i = 0; i < total_summary[channel_index].raw.tof_bin_counts.size(); ++i) {
+          total_summary[channel_index].raw.tof_bin_counts[i] += summary_by_channel[channel_index].raw.tof_bin_counts[i];
+          total_summary[channel_index].filtered.tof_bin_counts[i] +=
+              summary_by_channel[channel_index].filtered.tof_bin_counts[i];
+          total_summary[channel_index].clean.tof_bin_counts[i] += summary_by_channel[channel_index].clean.tof_bin_counts[i];
+        }
+        for (std::size_t i = 0; i < total_summary[channel_index].clean.energy_bin_counts.size(); ++i) {
+          total_summary[channel_index].clean.energy_bin_counts[i] +=
+              summary_by_channel[channel_index].clean.energy_bin_counts[i];
+        }
+      }
+      static_cast<void>(run_number);
+    }
+    for (std::size_t channel_index = 0; channel_index < total_summary.size(); ++channel_index) {
+      PrintSpreadsheetRow(0, channel_index, total_summary[channel_index], true);
+    }
+  }
   return true;
 }
 

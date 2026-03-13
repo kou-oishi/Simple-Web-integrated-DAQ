@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -29,10 +30,13 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
   bool UpdateDrawables(std::string& error_text) override;
   bool Finalise(std::string& error_text) override;
   void SetAccumulateAcrossRuns(bool enabled) override;
+  void SetRunTimeInfo(const std::vector<RealtimeRunTimeInfo>& run_time_info) override;
 
  private:
   template <typename T>
   using StageArray = std::array<std::unique_ptr<T>, 3>;
+  static constexpr std::size_t kStatsTofBinCount = 7;
+  static constexpr std::size_t kStatsEnergyBinCount = 37;
 
   struct ExclusionRange {
     Double_t start_unix = 0.0;
@@ -45,6 +49,7 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
   };
 
   struct DeferredNamedHit {
+    uint32_t run_number = 0;
     std::size_t channel_index = 0;
     std::size_t board_index = 0;
     Double_t timestamp_sec = 0.0;
@@ -59,6 +64,19 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
     std::chrono::steady_clock::time_point decision_deadline{};
   };
 
+  struct StageSummary {
+    uint64_t event_count = 0;
+    std::array<uint64_t, kStatsTofBinCount> tof_bin_counts{};
+    std::array<uint64_t, kStatsEnergyBinCount> energy_bin_counts{};
+  };
+
+  struct ChannelSummary {
+    StageSummary raw;
+    StageSummary filtered;
+    StageSummary clean;
+  };
+  using PerRunSummary = std::array<ChannelSummary, Kc705TofNamedChannelCount()>;
+
   bool Event(const Kc705TofEvent& Event, const DecodedMessage& message, std::string& error_text) override;
   bool Event(const Kc705TofEvent& Event, std::string& error_text) override;
   bool LoadExcludedTimeRanges(std::string& error_text);
@@ -72,6 +90,11 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
   void FlushExpiredCleanCandidates(bool flush_all);
   void ResetAccumulatedHistograms();
   void ResetPerRunState(bool reset_time_range, bool reset_periodic_graphs);
+  void FillTofBinCounts(StageSummary& summary, Double_t tof_ms);
+  void FillEnergyBinCounts(StageSummary& summary, Double_t energy_mev);
+  double ComputeExcludedDurationSec(std::size_t channel_index, const RealtimeRunTimeInfo& run_time_info) const;
+  void PrintSpreadsheetHeaderIfNeeded();
+  void PrintSpreadsheetRow(uint32_t run_number, std::size_t channel_index, const ChannelSummary& summary, bool is_total);
 
   Double_t daq_start_time_[2] = {-1, -1};
   Double_t min_time_ = 1e100, max_time_ = -1e100;
@@ -79,6 +102,9 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
   bool accumulate_across_runs_ = false;
   Double_t clean_cluster_sec_ = 1.0;
   std::array<std::vector<ExclusionRange>, Kc705TofNamedChannelCount()> excluded_time_ranges_;
+  std::map<uint32_t, RealtimeRunTimeInfo> run_time_info_by_run_;
+  std::map<uint32_t, PerRunSummary> run_summary_by_run_;
+  bool spreadsheet_header_printed_ = false;
   uint64_t excluded_event_count_ = 0;
   std::array<uint64_t, Kc705TofNamedChannelCount()> excluded_event_count_by_channel_{};
   
@@ -92,6 +118,8 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
   std::unique_ptr<TCanvas> canvas_hit_deltas_;
   std::unique_ptr<TCanvas> canvas_tof_groups_;
   std::unique_ptr<TCanvas> canvas_tof_groups_us_;
+  std::unique_ptr<TCanvas> canvas_energies_;
+  std::unique_ptr<TCanvas> canvas_energy_groups_;
   StageArray<TH1D> hist_board_stages_{};
   StageArray<TH1D> hist_channel_stages_{};
   StageArray<TH1D> hist_channel_named_stages_{};
@@ -113,6 +141,8 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
   std::vector<std::unique_ptr<TH1D>> hist_tof_groups_us_;
   std::vector<std::unique_ptr<TH1D>> hist_tof_groups_us_filtered_;
   std::vector<std::unique_ptr<TH1D>> hist_tof_groups_us_clean_;
+  std::vector<std::unique_ptr<TH1D>> hist_energies_clean_;
+  std::vector<std::unique_ptr<TH1D>> hist_energy_groups_clean_;
   StageArray<TLatex> board_entry_labels_{};
   StageArray<TLatex> channel_entry_labels_{};
   StageArray<TLatex> channel_named_entry_labels_{};
@@ -134,6 +164,8 @@ class Kc705TofOverviewAnalysis final : public TypedRealtimeAnalysis<Kc705TofEven
   std::vector<std::unique_ptr<TLatex>> tof_group_us_entry_labels_;
   std::vector<std::unique_ptr<TLatex>> tof_group_us_filtered_entry_labels_;
   std::vector<std::unique_ptr<TLatex>> tof_group_us_clean_entry_labels_;
+  std::vector<std::unique_ptr<TLatex>> energy_clean_entry_labels_;
+  std::vector<std::unique_ptr<TLatex>> energy_group_clean_entry_labels_;
   std::array<std::unique_ptr<TGraph>, Kc705TofPeriodicChannelCount()> periodic_rate_graphs_;
   std::array<std::deque<Double_t>, Kc705TofPeriodicChannelCount()> periodic_event_times_;
   std::array<Double_t, 2> last_periodic_time_ms_ = {0.0, 0.0};
